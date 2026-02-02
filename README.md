@@ -14,6 +14,5 @@ Linux Mint:              192.168.10.200/24
 Gateway:                 192.168.10.1
 
 
-Clonar repositorio
+Clonar repositorio:
 git clone https://github.com/Dany1912-dev/administracion_sistemas/
-

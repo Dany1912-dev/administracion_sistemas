@@ -1,0 +1,1 @@
+DESCRIPCION: Evidencia de las snapshots tomadas el dia lunes 2 de febrero del 2026
