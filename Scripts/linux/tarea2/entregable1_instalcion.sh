@@ -3,7 +3,12 @@ scope=""
 ipInicial=""
 ipFinal=""
 mascara=""
-
+tiempoSesion=""
+gateway=""
+dnsPrimario=""
+dnsSecundario=""
+broadcast=""
+ipServidor=""
 calcularMascara(){
    local ipInicial="$1"
    local ipFinal="$2"
@@ -43,7 +48,6 @@ calcularMascara(){
    #Calcular CIDR por hosts necesarios
    local cidr_hosts=32
    while [[ $cidr_hosts -ge 8 ]]; do
-      # Calcular 2^(32-cidr) sin operadores <<
       local bits=$((32 - cidr_hosts))
       local potencia=1
       for ((i=0; i<bits; i++)); do
@@ -60,7 +64,6 @@ calcularMascara(){
    #Calcular CIDR por misma subred
    local cidr_subred=32
    while [[ $cidr_subred -ge 8 ]]; do
-      # Calcular máscara sin operadores <<
       local mascara_tmp=0
       # Poner 1's en los primeros cidr_subred bits
       for ((i=0; i<cidr_subred; i++)); do
@@ -112,8 +115,7 @@ calcularMascara(){
    # Verificar si el rango cabe en la subred
    local red_base=$(( ip1_dec & mascara_dec ))
    
-   # Calcular broadcast sin operadores <<
-   local broadcast=$(( (~mascara_dec) & 0x7FFFFFFF ))
+   broadcast=$(( (~mascara_dec) & 0x7FFFFFFF ))
    # Ajustar para 32 bits
    if [[ $mascara_dec -gt 0 ]]; then
       broadcast=$(( red_base | (0xFFFFFFFF & ~mascara_dec) ))
@@ -122,12 +124,13 @@ calcularMascara(){
    fi
    
    if [[ $ip1_dec -lt $red_base || $ip2_dec -gt $broadcast ]]; then
-      echo "  ERROR: El rango no cabe en la subred $(_dec2ip "$red_base")/$cidr_final"
-      echo "  - Broadcast de la subred: $(_dec2ip "$broadcast")"
+      echo "ERROR: El rango no cabe en la subred $(_dec2ip "$red_base")/$cidr_final"
+      echo "Broadcast de la subred: $(_dec2ip "$broadcast")"
     return 1
    fi
    
-   echo "  ✓ Mascara de subred determinada: $mascara"
+   echo "Broadcast de la subred: $(_dec2ip "$broadcast")"
+   echo "Mascara de subred determinada: $mascara"
    return 0
 }
 
@@ -239,204 +242,7 @@ copararIps(){
    return 0
 }
 
-configurarIpEstatica() {
-   local ip_servidor="$1"
-   local mascara="$2"
-    
-   echo "Configurando IP estática en red interna 'red_sistemas'..."
-    
-   # Detectar interfaces (excluyendo lo)
-   local interfaces=($(ls /sys/class/net/ | grep -v lo | sort))
-    
-   # Asumimos:
-   # - eth0 o ens33 = NAT (NO TOCAR)
-   # - eth1 o ens34 = Red Interna "red_sistemas" (CONFIGURAR)
-   local interfaz_nat="${interfaces[0]}"
-   local interfaz_dhcp="${interfaces[1]}"
-    
-   echo "  - Adaptador 1 (NAT): $interfaz_nat - SIN CAMBIOS"
-   echo "  - Adaptador 2 (Red Interna): $interfaz_dhcp - CONFIGURANDO"
-    
-   # SOLO configuramos la segunda interfaz
-   # Calcular CIDR
-   _mascara_a_cidr() {
-         local masc="$1"
-         IFS='.' read -r a b c d <<< "$masc"
-         local bits=0
-         local val
-         for oct in $a $b $c $d; do
-            val=$oct
-            while [[ $val -gt 0 ]]; do
-                bits=$((bits + (val & 1)))
-                val=$((val >> 1))
-            done
-         done
-      echo $bits
-   }
-    
-   local cidr=$(_mascara_a_cidr "$mascara")
-    
-   # Configurar SOLO la interfaz de red interna
-   cat > /etc/sysconfig/network/ifcfg-$interfaz_dhcp << EOF
-   # Adaptador Red Interna - Servidor DHCP
-   # Interfaz: $interfaz_dhcp
-   # Red: red_sistemas
-   BOOTPROTO='static'
-   IPADDR='$ip_servidor/$cidr'
-   STARTMODE='auto'
-EOF
-    
-   echo "  ✓ Red Interna ($interfaz_dhcp) configurada con IP: $ip_servidor/$cidr"
-    
-   # NO reiniciamos todo el servicio de red, solo la interfaz
-   wicked ifreload $interfaz_dhcp
-   wicked ifup $interfaz_dhcp
-    
-   sleep 2
-    
-   # Mostrar solo la configuración de la red interna
-   echo ""
-   echo "=== CONFIGURACIÓN RED INTERNA ==="
-   ip -4 addr show $interfaz_dhcp 2>/dev/null | grep inet | head -1 | awk '{print "  IP: " $2}'
-   echo "  Interfaz: $interfaz_dhcp"
-   echo "  Red: red_sistemas"
-   echo "================================"
-    
-   return 0
-}
-
-generarConfiguracionDHCP() {
-   local scope="$1"
-   local ip_servidor="$2"
-   local ip_inicial="$3"
-   local ip_final="$4"
-   local mascara="$5"
-   local tiempo="$6"
-   local gateway="$7"
-   local dns="$8"
-    
-   echo "Generando configuración de DHCP para red interna 'red_sistemas'..."
-    
-   # Detectar interfaz de red interna (segundo adaptador)
-   local interfaces=($(ls /sys/class/net/ | grep -v lo | sort))
-   local interfaz_dhcp="${interfaces[1]}"
-    
-   if [[ -z "$interfaz_dhcp" ]]; then
-      echo "ERROR: No se detectó adaptador de red interna"
-      return 1
-   fi
-    
-   # Obtener MAC address de la interfaz DHCP
-   local mac_address=$(cat /sys/class/net/$interfaz_dhcp/address)
-    
-   # Calcular primera IP para clientes (ip_inicial + 1)
-   IFS='.' read -r a b c d <<< "$ip_inicial"
-   local ip_clientes_inicial="$a.$b.$c.$((d + 1))"
-   local broadcast="$a.$b.$c.255"
-    
-   # Configurar DHCP para que escuche SOLO en la interfaz de red interna
-   cat > /etc/sysconfig/dhcpd << EOF
-# Configuración DHCP para openSUSE Leap 16.0
-# ESCUCHAR SOLO EN RED INTERNA
-DHCPD_INTERFACE="$interfaz_dhcp"
-DHCPD_OPTIONS="-q"
-EOF
-
-   # Generar configuración
-   cat > /etc/dhcp/dhcpd.conf << EOF
-#
-# Servidor DHCP - Red Interna "red_sistemas"
-# Generado: $(date)
-# Ámbito: $scope
-#
-
-authoritative;
-
-default-lease-time $((tiempo * 60));
-max-lease-time $((tiempo * 60));
-
-option domain-name "red_sistemas.local";
-option domain-name-servers ${dns:-8.8.8.8, 8.8.4.4};
-
-# Red interna
-subnet $a.$b.$c.0 netmask $mascara {
-   option routers $ip_servidor;
-   option subnet-mask $mascara;
-   option broadcast-address $broadcast;
-    
-   range $ip_clientes_inicial $ip_final;
-    
-   # IP estática del servidor
-   host servidor-dhcp {
-      hardware ethernet $mac_address;
-      fixed-address $ip_servidor;
-   }
-}
-
-# Archivo de leases
-lease-file-name "/var/lib/dhcp/db/dhcpd.leases";
-EOF
-
-   # Crear directorio y archivo de leases
-   mkdir -p /var/lib/dhcp/db
-   touch /var/lib/dhcp/db/dhcpd.leases
-    
-   echo "  ✓ Configuración DHCP lista para red interna"
-   echo "  ✓ Interfaz: $interfaz_dhcp"
-   echo "  ✓ MAC: $mac_address"
-   echo "  ✓ Rango: $ip_clientes_inicial - $ip_final"
-    
-   return 0
-}
-
-levantar_servidor_dhcp() {
-   echo "Iniciando servidor DHCP en red interna 'red_sistemas'..."
-    
-   # Detectar interfaz de red interna
-   local interfaces=($(ls /sys/class/net/ | grep -v lo | sort))
-   local interfaz_dhcp="${interfaces[1]}"
-    
-   if [[ -z "$interfaz_dhcp" ]]; then
-      echo "ERROR: No se detectó interfaz de red interna"
-      return 1
-   fi
-    
-   # Verificar e instalar dhcp-server si es necesario
-   if ! rpm -q dhcp-server >/dev/null 2>&1; then
-      echo "  - Instalando dhcp-server..."
-      zypper --non-interactive install dhcp-server
-   fi
-    
-   # Asegurar que el servicio escuche SOLO en la red interna
-   echo "DHCPD_INTERFACE=\"$interfaz_dhcp\"" > /etc/sysconfig/dhcpd
-    
-   # Habilitar forwarding solo para la red interna
-   sysctl -w net.ipv4.ip_forward=1 >/dev/null
-    
-   # Iniciar servicio
-   systemctl enable dhcpd
-   systemctl restart dhcpd
-    
-   sleep 2
-    
-   if systemctl is-active dhcpd >/dev/null 2>&1; then
-      echo ""
-      echo "SERVIDOR DHCP ACTIVO - RED INTERNA"
-      echo "========================================"
-      echo "  Red:       red_sistemas"
-      echo "  Interfaz:  $interfaz_dhcp"
-      echo "  IP:        $ipInicial"
-      echo "  Rango:     $(echo $ipInicial | cut -d. -f1-3).$(($(echo $ipInicial | cut -d. -f4) + 1)) - $ipFinal"
-      echo "  Máscara:   $mascara"
-      echo "========================================"
-   else
-      echo "ERROR: No se pudo iniciar el servidor DHCP"
-      journalctl -u dhcpd --no-pager | tail -5
-      return 1
-   fi
-}
-
-intalacion_completa(){
+intalacionCompleta(){
    echo " VERIFICACANDO INSTALCION DE $PAQUETE "
 
    if rpm -q $PAQUETE > /dev/null 2>&1; then
@@ -452,7 +258,10 @@ intalacion_completa(){
          exit 1
       fi
    fi
+   ConfiguracionDHCP
+}
 
+ConfiguracionDHCP(){
    echo -e  "\nCONFIGURACION DHCP DINAMICA"
 
    read -p "Nombre descriptivo del ambito: " scope
@@ -460,6 +269,9 @@ intalacion_completa(){
    until
       read -p "Rango inicial de la IP: " ipInicial
       validarip "$ipInicial" "host"
+      ipServidor="$ipInicial"
+      local IFS='.' read -ra octetos <<< "$ipInicial"
+      ipInicial="{${octetos[0]}.${octetos[1]}.${octetos[2]}.$((octetos[3] + 1))}"
    do
       echo "Intentando de nuevo"
    done
@@ -517,28 +329,161 @@ intalacion_completa(){
 
    until
       read -p "DNS (OPCIONAL, Presione enter para omitir): " dns
-      if [[ -z "$dns" ]]; then
+      if [[ -z "$dnsPrimario" ]]; then
          true
-      elif [[ "$dns" == "none" ]]; then
+      elif [[ "$dnsPrimario" == "none" ]]; then
          true
       else 
-         validarip "$dns" "dns"
+         validarip "$dnsPrimario" "dns"
       fi
    do
       echo "Intentando de nuevo"
    done
 
+   if [[ -z "$dnsPrimario" ]]; then
+      echo "No se agrego un DNS primario."
+   else
+      until
+         read -p "¿Desea agregar un DNS secundario? (s/n): " agregarDNS
+         if [[ "$agregarDNS" == "s" ]]; then
+            read -p "DNS secundario: " dnsSecundario
+            validarip "$dnsSecundario" "dns"
+         elif [[ "$agregarDNS" == "n" ]]; then
+            break
+         else
+            echo "Por favor ingrese 's' o 'n'."
+         fi
+      do
+         echo "Intentando de nuevo"
+      done
+   fi
+
+   echo -e "\nInterfaces de red disponibles:"
+	ip -br link show | grep -v "lo" | awk '{print $1}'
+	read -p "Ingrese la interfaz de red a usar (ej: enp0s8): " interfaz
+
+    echo -e "\nLA CONFIGURACION FINAL ES:"
+	echo -e "Nombre del ambito: $scope"
+	echo -e "Mascara: $mascara"
+	echo -e "IP inicial: $ipInicial"
+	echo -e "IP final: $ipFinal"
+	echo -e "Tiempo de sesion: $tiempoSesion"
+	echo -e "Gateway: $gateway"
+	echo -e "DNS primario: $dnsPrimario"
+	echo -e "DNS alternativo: $dnsSecundario"
+	echo -e "Interfaz: $interfaz\n"
+
+   read -p "Acepta esta configuracion? (y/n): " opc
+   if [ "$opc" = "y" ]; then
    echo ""
    echo "APLICANDO CONFIGURACION"
    echo ""
+	# Calcular la dirección de red correctamente
+	IFS='.' read -r a b c d <<< "$ipInicial"
+	IFS='.' read -r ma mb mc md <<< "$mascara"
+	
+	# AND bit a bit entre IP y máscara para obtener la red
+	red="$((a & ma)).$((b & mb)).$((c & mc)).$((d & md))"
+	
+	# Calcular broadcast
+	broadcast="$((a | (255 - ma))).$((b | (255 - mb))).$((c | (255 - mc))).$((d | (255 - md)))"
+	
+	echo -e "${amarillo}Red calculada: $red${nc}"
+	echo -e "${amarillo}Broadcast calculado: $broadcast${nc}"
+	
+	# Crear configuración DHCP
+	echo -e "${amarillo}Creando configuración DHCP...${nc}"
+	sudo bash -c "cat > /etc/dhcpd.conf" << EOF
+# Configuracion DHCP - $scope
+default-lease-time $tiempoSesion;
+max-lease-time $((tiempoSesion * 2));
+authoritative;
 
-   configurarIpEstatica "$ipInicial" "$mascara"
-   generarConfiguracionDHCP "$scope" "$ipInicial" "$ipInicial" "$ipFinal" "$mascara" "$tiempoSesion" "$gateway" "$dns" || exit 1
-   levantar_servidor_dhcp
+subnet $red netmask $mascara {
+    range $ipInicial $ipFinal;
+    option routers $gateway;
+    option subnet-mask $mascara;
+$(if [ "$dnsPrimario" != "" ] && [ "$dnsSecundario" != "" ]; then
+    echo "    option domain-name-servers $dnsPrimario, $dnsSecundario;"
+elif [ "$dnsPrimario" != "" ]; then
+    echo "    option domain-name-servers $dnsPrimario;"
+fi)
+    option broadcast-address $broadcast;
+}
+EOF
 
+		# Configurar interfaz
+		interfaz="enp0s8"
+		echo -e "Configurando interfaz de red..."
+		sudo bash -c "echo 'DHCPD_INTERFACE=\"$interfaz\"' > /etc/sysconfig/dhcpd"
+		
+		echo -e "${amarillo}Configurando IP estática $ipServidor en la interfaz $interfaz...${nc}"
+		sudo ip addr flush dev $interfaz
+		sudo ip addr add $ipServidor/$( calcular_Bits "$mascara" ) dev $interfaz
+		sudo ip link set $interfaz up
+
+sudo bash -c "cat > /etc/sysconfig/network/ifcfg-$interfaz" << EOF
+BOOTPROTO='static'
+STARTMODE='auto'
+IPADDR='$ipServidor'
+NETMASK='$mascara'
+EOF
+
+		# Reiniciar servicio
+		echo -e "Reiniciando servicio DHCP..."
+		sudo systemctl restart dhcpd
+		
+		echo -e "IP estática $ipServidor configurada en $interfaz"
+
+		# Verificar estado
+		if sudo systemctl is-active --quiet dhcpd; then
+			echo -e "¡Servidor DHCP configurado y funcionando correctamente!"
+			sudo systemctl status dhcpd --no-pager
+		else
+			echo -e "Error al iniciar el servicio DHCP"
+			echo -e "Ejecute: sudo journalctl -xeu dhcpd.service"
+	   fi
+   else
+      echo -e "Volviendo a configurar..."
+      ConfiguracionDHCP
+   fi
 }
 
-mostrar_menu() {
+verificarInstalacion(){
+   echo " VERIFICACANDO INSTALCION DE $PAQUETE "
+
+   if rpm -q $PAQUETE > /dev/null 2>&1; then
+      echo "[OK] El paquete '$PAQUETE' ya esta instalado."
+   else
+      echo "El paquete '$PAQUETE' no esta instaldo"
+   fi
+}
+
+reiniciarDHCP(){
+    echo -e "Reiniciando servidor DHCP..."
+    
+    if ! systemctl is-active --quiet dhcpd; then
+        echo -e "El servicio DHCP no está activo"
+        read -p "¿Desea iniciarlo en lugar de reiniciarlo? (y/n): " opc
+        if [[ "$opc" = "y" ]]; then
+            sudo systemctl start dhcpd
+        else
+            return 1
+        fi
+    else
+        sudo systemctl restart dhcpd
+    fi
+    
+    if systemctl is-active --quiet dhcpd; then
+        echo -e "Servidor DHCP reiniciado correctamente"
+        sudo systemctl status dhcpd --no-pager
+    else
+        echo -e "Error al reiniciar el servidor DHCP"
+        echo -e "Ejecute: sudo journalctl -xeu dhcpd.service"
+    fi
+}
+
+mostrarMenu() {
     clear
     echo "═══════════════════════════════════════════"
     echo "   SERVIDOR DHCP - RED INTERNA"
@@ -553,11 +498,11 @@ mostrar_menu() {
     read -p " Seleccione una opción [1-6]: " opcion
     
     case $opcion in
-        1) verificar_instalacion ;;
-        2) instalacion_completa ;;   # <-- TUS FUNCIONES
-        3) configurar_dhcp ;;        # <-- TU FUNCIÓN ORIGINAL
-        4) monitorear_leases ;;
-        5) reiniciar_servicio ;;
+        1) verificarInstalacion ;;
+        2) intalacionCompleta ;;
+        3) ConfiguracionDHCP ;;
+        4) monitorear ;;
+        5) reiniciarDHCP ;;
         6) exit 0 ;;
         *) 
             echo "Opción inválida"
@@ -567,9 +512,9 @@ mostrar_menu() {
     esac
 }
 
-if [[ $EUID -ne 0 ]]; then
-   echo "Ejecutar como root: sudo $0"
-   exit 1
-fi
+#if [[ $EUID -ne 0 ]]; then
+#   echo "Ejecutar como root: sudo $0"
+#   exit 1
+#fi
 
-mostrar_menu
+mostrarMenu
