@@ -150,19 +150,19 @@ validarip(){
       return 1
    fi
 
-   for i in {0..3}; do 
-      local octeto=${octetos[i]}
+   for i in 0 1 2 3; do
+      octeto="${octetos[$i]}"
 
       if [[ "$octeto" =~ ^0[0-9]+ ]] && [[ ${#octeto} -gt 1 ]]; then
          echo "ERROR: Octeto '$octeto' no puede tener ceros a la izquierda"
          return 1
       fi
 
-      if [[ "$octeto" -gt 255 || "$octeto" -lt 0 ]]; then
+      if ((octeto > 255 || octeto < 0)); then
          echo "ERROR: Octeto '$octeto' fuera de rango (0-255)."
          return 1
       fi
-   done   
+   done
 
    local primeroOcteto=${octetos[0]}
    local segundoOcteto=${octetos[1]}
@@ -270,8 +270,9 @@ ConfiguracionDHCP(){
       read -p "Rango inicial de la IP: " ipInicial
       validarip "$ipInicial" "host"
       ipServidor="$ipInicial"
-      local IFS='.' read -ra octetos <<< "$ipInicial"
-      ipInicial="{${octetos[0]}.${octetos[1]}.${octetos[2]}.$((octetos[3] + 1))}"
+      local IFS='.' 
+      read -ra octetos <<< "$ipInicial"
+      ipInicial="${octetos[0]}.${octetos[1]}.${octetos[2]}.$((octetos[3] + 1))"
    do
       echo "Intentando de nuevo"
    done
