@@ -420,7 +420,7 @@ EOF
 		
 		echo -e "${amarillo}Configurando IP estática $ipServidor en la interfaz $interfaz...${nc}"
 		sudo ip addr flush dev $interfaz
-		sudo ip addr add $ipServidor/$( calcular_Bits "$mascara" ) dev $interfaz
+		sudo ip addr add $ipServidor/$( calcularBits "$mascara" ) dev $interfaz
 		sudo ip link set $interfaz up
 
 sudo bash -c "cat > /etc/sysconfig/network/ifcfg-$interfaz" << EOF
@@ -448,6 +448,32 @@ EOF
       echo -e "Volviendo a configurar..."
       ConfiguracionDHCP
    fi
+}
+
+calcularBits(){
+	local masc="$1"
+	count=0
+	IFS='.' read -r a b c d <<< "$masc"
+	for octeto in $d $c $b $a; do
+		n=255
+		if [ $octeto -eq 0 ]; then
+			count=$(( count + 8 ))
+			continue
+		elif [ $octeto -eq 255 ]; then
+			echo $count
+			return 0
+		else
+		for i in {0..7}; do
+			n=$(( n - (2 ** i) ))
+			count=$(( count + 1 ))
+			if [[ $n -eq $octeto ]]; then
+				echo $count
+				return 0
+			fi
+		done
+		fi
+	done
+	return 0
 }
 
 verificarInstalacion(){
