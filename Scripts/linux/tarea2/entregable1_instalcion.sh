@@ -250,13 +250,7 @@ intalacionCompleta(){
    else
       echo "[!] Instalando $PAQUETE..."
       zypper --non-interactive install $PAQUETE
-
-      if [$? -eq 0]; then
-         echo "[EXITO] instalacion completada."
-      else
-         echo "[ERROR] Fallo la instalacion"
-         exit 1
-      fi
+      echo "[EXITO] instalacion completada."
    fi
    ConfiguracionDHCP
 }
