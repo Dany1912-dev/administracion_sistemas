@@ -437,39 +437,40 @@ EOF
 		echo -e "Configurando interfaz de red..."
 		sudo bash -c "echo 'DHCPD_INTERFACE=\"$interfaz\"' > /etc/sysconfig/dhcpd"
 		
-		echo -e "Limpiando y configurando IP estática $ipServidor en la interfaz $interfaz..."
+		echo -e "Configurando IP estática $ipServidor en la interfaz $interfaz..."
+		echo ""
 		
-		# 1. Detener la interfaz
-		echo -e "  [1/5] Deteniendo interfaz $interfaz..."
-		sudo ip link set $interfaz down 2>/dev/null
+		# Mostrar configuración actual
+		echo -e "Configuración actual de $interfaz:"
+		ip addr show $interfaz | grep "inet " | awk '{print "  " $0}'
+		echo ""
 		
-		# 2. Eliminar TODAS las IPs existentes
-		echo -e "  [2/5] Eliminando configuraciones anteriores..."
-		sudo ip addr flush dev $interfaz 2>/dev/null
+		# Obtener la IP actual si existe
+		ip_actual=$(ip addr show $interfaz | grep "inet " | head -1 | awk '{print $2}')
 		
-		# 3. Levantar la interfaz
-		echo -e "  [3/5] Levantando interfaz..."
+		if [ -n "$ip_actual" ]; then
+			echo -e "Eliminando IP actual: $ip_actual"
+			sudo ip addr del $ip_actual dev $interfaz 2>/dev/null
+		fi
+		
+		# Asignar la nueva IP
+		echo -e "Asignando nueva IP: $ipServidor/$( calcularBits "$mascara" )"
+		if sudo ip addr add $ipServidor/$( calcularBits "$mascara" ) dev $interfaz 2>&1; then
+			echo -e "IP configurada exitosamente"
+		else
+			echo -e "Error al configurar IP"
+		fi
+		
+		# Asegurar que la interfaz esté UP
 		sudo ip link set $interfaz up
 		
-		# 4. Esperar un momento para que la interfaz esté lista
-		sleep 1
-		
-		# 5. Asignar la nueva IP estática
-		echo -e "  [4/5] Asignando IP estática $ipServidor/$( calcularBits "$mascara" )..."
-		sudo ip addr add $ipServidor/$( calcularBits "$mascara" ) dev $interfaz
-		
-		# Verificar que la IP se asignó correctamente
-		if ip addr show $interfaz | grep -q "$ipServidor"; then
-			echo -e "IP estática asignada correctamente"
-		else
-			echo -e "Error al asignar IP estática"
-			echo -e "Estado actual de $interfaz:"
-			ip addr show $interfaz
-			read -p "Presione Enter para continuar de todas formas..."
-		fi
+		# Verificación
+		echo -e "\nConfiguración final de $interfaz:"
+		ip addr show $interfaz | grep "inet " | awk '{print "  " $0}'
+		echo ""
 
-		# 6. Crear archivo de configuración persistente
-		echo -e "  [5/5] Creando configuración persistente..."
+		# Crear/actualizar archivo de configuración persistente
+		echo -e "Actualizando configuración persistente..."
 sudo bash -c "cat > /etc/sysconfig/network/ifcfg-$interfaz" << EOF
 BOOTPROTO='static'
 STARTMODE='auto'
@@ -478,7 +479,8 @@ NETMASK='$mascara'
 NAME='$interfaz'
 EOF
 
-		echo -e "Configuración de red completada."
+		echo "Configuración de red completada."
+		echo ""
 		echo ""
 
 		# Reiniciar servicio
@@ -505,7 +507,7 @@ EOF
 			sudo systemctl status dhcpd --no-pager
 		else
 			echo -e "═══════════════════════════════════════════"
-			echo -e "  ✗ Error al iniciar el servicio DHCP"
+			echo -e " Error al iniciar el servicio DHCP"
 			echo -e "═══════════════════════════════════════════"
 			echo ""
 			echo -e "Ejecute el siguiente comando para ver detalles del error:"
