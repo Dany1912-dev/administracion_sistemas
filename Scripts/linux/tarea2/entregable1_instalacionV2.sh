@@ -440,45 +440,89 @@ EOF
 		echo -e "Configurando IP estática $ipServidor en la interfaz $interfaz..."
 		echo ""
 		
-		# Mostrar configuración actual
-		echo -e "Configuración actual de $interfaz:"
-		ip addr show $interfaz | grep "inet " | awk '{print "  " $0}'
-		echo ""
-		
-		# Obtener la IP actual si existe
-		ip_actual=$(ip addr show $interfaz | grep "inet " | head -1 | awk '{print $2}')
-		
-		if [ -n "$ip_actual" ]; then
-			echo -e "Eliminando IP actual: $ip_actual"
-			sudo ip addr del $ip_actual dev $interfaz 2>/dev/null
-		fi
-		
-		# Asignar la nueva IP
-		echo -e "Asignando nueva IP: $ipServidor/$( calcularBits "$mascara" )"
-		if sudo ip addr add $ipServidor/$( calcularBits "$mascara" ) dev $interfaz 2>&1; then
-			echo -e "IP configurada exitosamente"
+		# Detectar qué gestor de red está activo
+		if systemctl is-active --quiet NetworkManager; then
+			echo -e "Usando NetworkManager (nmcli)..."
+			echo ""
+			
+			# Mostrar configuración actual
+			echo -e "Configuración actual:"
+			nmcli device show $interfaz 2>/dev/null | grep -E "IP4.ADDRESS|GENERAL.STATE" || echo "  Sin configuración"
+			echo ""
+			
+			# Verificar si existe una conexión para esta interfaz
+			conexion_existente=$(nmcli -t -f NAME,DEVICE connection show 2>/dev/null | grep ":$interfaz$" | cut -d: -f1 | head -1)
+			
+			if [ -n "$conexion_existente" ]; then
+				echo -e "Modificando conexión existente: $conexion_existente"
+				
+				# Modificar la conexión existente
+				sudo nmcli connection modify "$conexion_existente" \
+					ipv4.method manual \
+					ipv4.addresses "$ipServidor/$( calcularBits "$mascara" )"
+				
+				# Aplicar cambios
+				echo -e "Aplicando cambios..."
+				sudo nmcli connection up "$conexion_existente"
+			else
+				echo -e "Creando nueva conexión para $interfaz"
+				
+				# Crear nueva conexión
+				sudo nmcli connection add \
+					type ethernet \
+					con-name "dhcp-server-$interfaz" \
+					ifname $interfaz \
+					ipv4.method manual \
+					ipv4.addresses "$ipServidor/$( calcularBits "$mascara" )"
+				
+				# Activar la conexión
+				sudo nmcli connection up "dhcp-server-$interfaz"
+			fi
+			
+			# Verificación
+			echo -e "\nConfiguración aplicada:"
+			nmcli device show $interfaz | grep -E "IP4.ADDRESS|GENERAL.STATE"
+			
 		else
-			echo -e "Error al configurar IP"
-		fi
-		
-		# Asegurar que la interfaz esté UP
-		sudo ip link set $interfaz up
-		
-		# Verificación
-		echo -e "\nConfiguración final de $interfaz:"
-		ip addr show $interfaz | grep "inet " | awk '{print "  " $0}'
-		echo ""
-
-		# Crear/actualizar archivo de configuración persistente
-		echo -e "Actualizando configuración persistente..."
-sudo bash -c "cat > /etc/sysconfig/network/ifcfg-$interfaz" << EOF
+			echo -e "Usando configuración manual con comandos ip..."
+			echo ""
+			
+			# Mostrar configuración actual
+			echo -e "Configuración actual:"
+			ip addr show $interfaz | grep "inet " | awk '{print "  " $0}' || echo "  Sin IP configurada"
+			echo ""
+			
+			# Obtener la IP actual si existe
+			ip_actual=$(ip addr show $interfaz | grep "inet " | head -1 | awk '{print $2}')
+			
+			if [ -n "$ip_actual" ]; then
+				echo -e "Eliminando IP actual: $ip_actual"
+				sudo ip addr del $ip_actual dev $interfaz 2>/dev/null
+			fi
+			
+			# Asignar la nueva IP
+			echo -e "Asignando nueva IP: $ipServidor/$( calcularBits "$mascara" )"
+			sudo ip addr add $ipServidor/$( calcularBits "$mascara" ) dev $interfaz
+			
+			# Asegurar que la interfaz esté UP
+			sudo ip link set $interfaz up
+			
+			# Crear configuración persistente
+			echo -e "Creando configuración persistente..."
+			sudo bash -c "cat > /etc/sysconfig/network/ifcfg-$interfaz" << EOF
 BOOTPROTO='static'
 STARTMODE='auto'
 IPADDR='$ipServidor'
 NETMASK='$mascara'
 NAME='$interfaz'
 EOF
-
+			
+			# Verificación
+			echo -e "\nConfiguración final:"
+			ip addr show $interfaz | grep "inet " | awk '{print "  " $0}'
+		fi
+		
+		echo ""
 		echo "Configuración de red completada."
 		echo ""
 		echo ""
@@ -497,17 +541,17 @@ EOF
 			echo -e "═══════════════════════════════════════════"
 			echo ""
 			echo -e "Resumen de configuración:"
-			echo -e "  • Red: $red/$( calcularBits "$mascara" )"
-			echo -e "  • Rango DHCP: $ipInicial - $ipFinal"
-			echo -e "  • IP del servidor: $ipServidor"
-			echo -e "  • Interfaz: $interfaz"
-			echo -e "  • Gateway: ${gateway:-[No configurado]}"
-			echo -e "  • DNS: ${dnsPrimario:-[No configurado]}"
+			echo -e " Red: $red/$( calcularBits "$mascara" )"
+			echo -e " Rango DHCP: $ipInicial - $ipFinal"
+			echo -e " IP del servidor: $ipServidor"
+			echo -e " Interfaz: $interfaz"
+			echo -e " Gateway: ${gateway:-[No configurado]}"
+			echo -e " DNS: ${dnsPrimario:-[No configurado]}"
 			echo ""
 			sudo systemctl status dhcpd --no-pager
 		else
 			echo -e "═══════════════════════════════════════════"
-			echo -e " Error al iniciar el servicio DHCP"
+			echo -e "Error al iniciar el servicio DHCP"
 			echo -e "═══════════════════════════════════════════"
 			echo ""
 			echo -e "Ejecute el siguiente comando para ver detalles del error:"
@@ -606,7 +650,7 @@ detenerDHCP(){
 monitorear(){
     clear
     echo "═══════════════════════════════════════════"
-    echo "   MONITOR DEL SERVIDOR DHCP"
+    echo "MONITOR DEL SERVIDOR DHCP"
     echo "═══════════════════════════════════════════"
     echo ""
     
@@ -618,7 +662,7 @@ monitorear(){
         return 1
     fi
     
-    echo "✓ Estado del servicio: ACTIVO"
+    echo "Estado del servicio: ACTIVO"
     echo ""
     
     # Mostrar configuración actual
