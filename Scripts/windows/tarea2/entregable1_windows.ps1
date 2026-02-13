@@ -1,903 +1,719 @@
-# ============================================================================
-# Script de Configuracion de Servidor DHCP - Windows Server 2025
-# Administracion de Sistemas
-# PowerShell
-# ============================================================================
+#Tarea 2 - Automatizacion y gestion del servidor DHCP
 
-#Requires -RunAsAdministrator
+# ---------- Variables globales ----------
+$verde = "Green"
+$amarillo = "Yellow"
+$azul = "Cyan"
+$rojo = "Red"
+$nc = "White"
 
-# Variables globales
-$global:scope = ""
-$global:ipInicial = ""
-$global:ipFinal = ""
-$global:mascara = ""
-$global:tiempoSesion = 0
-$global:gateway = ""
-$global:dnsPrimario = ""
-$global:dnsSecundario = ""
-$global:broadcast = ""
-$global:ipServidor = ""
-$global:interfaz = ""
-
-# ============================================================================
-# FUNCIONES DE UTILIDAD
-# ============================================================================
-
-function Write-ColorOutput {
+# ---------- Funciones ----------
+function validar_IP {
     param(
-        [string]$Message,
-        [string]$Type = "Info"
+        [string]$ip
     )
     
-    switch ($Type) {
-        "Error"   { Write-Host "[ERROR] $Message" -ForegroundColor Red }
-        "Success" { Write-Host "[OK] $Message" -ForegroundColor Green }
-        "Warning" { Write-Host "[ADVERTENCIA] $Message" -ForegroundColor Yellow }
-        default   { Write-Host "[INFO] $Message" -ForegroundColor Cyan }
-    }
-}
-
-# ============================================================================
-# FUNCION: Convertir IP a numero decimal
-# ============================================================================
-function ConvertTo-IpDecimal {
-    param([string]$IpAddress)
-    
-    $octets = $IpAddress.Split('.')
-    [int64]$decimal = ([int64]$octets[0] * 16777216) + 
-                      ([int64]$octets[1] * 65536) + 
-                      ([int64]$octets[2] * 256) + 
-                      [int64]$octets[3]
-    return $decimal
-}
-
-# ============================================================================
-# FUNCION: Convertir numero decimal a IP
-# ============================================================================
-function ConvertFrom-IpDecimal {
-    param([int64]$Decimal)
-    
-    $o1 = [Math]::Floor($Decimal / 16777216) % 256
-    $o2 = [Math]::Floor($Decimal / 65536) % 256
-    $o3 = [Math]::Floor($Decimal / 256) % 256
-    $o4 = $Decimal % 256
-    
-    return "$o1.$o2.$o3.$o4"
-}
-
-# ============================================================================
-# FUNCION: Calcular mascara de subred automaticamente
-# ============================================================================
-function Calcular-Mascara {
-    param(
-        [string]$IpInicial,
-        [string]$IpFinal
-    )
-    
-    Write-ColorOutput "Calculando mascara de subred para el rango $IpInicial - $IpFinal..."
-    
-    $ip1Dec = ConvertTo-IpDecimal -IpAddress $IpInicial
-    $ip2Dec = ConvertTo-IpDecimal -IpAddress $IpFinal
-    
-    if ($ip2Dec -lt $ip1Dec) {
-        Write-ColorOutput "ERROR: IP final menor que IP inicial" "Error"
-        return $null
-    }
-    
-    $diferencia = $ip2Dec - $ip1Dec + 1
-    Write-Host "IPs en el rango: $diferencia"
-    
-    $hostsNecesarios = $diferencia + 2
-    Write-Host "Hosts necesarios: $hostsNecesarios"
-    
-    # Calcular CIDR por hosts necesarios
-    $cidrHosts = 32
-    for ($cidrHosts = 32; $cidrHosts -ge 8; $cidrHosts--) {
-        $bits = 32 - $cidrHosts
-        $hostsDisponibles = [Math]::Pow(2, $bits) - 2
-        
-        if ($hostsNecesarios -le $hostsDisponibles) {
-            break
-        }
-    }
-    
-    # Calcular CIDR por misma subred
-    $cidrSubred = 32
-    for ($cidrSubred = 32; $cidrSubred -ge 8; $cidrSubred--) {
-        $mascaraTmp = 0
-        
-        # Poner 1's en los primeros bits
-        for ($i = 0; $i -lt $cidrSubred; $i++) {
-            $mascaraTmp = ($mascaraTmp * 2) + 1
-        }
-        # Poner 0's en los bits restantes
-        for ($i = $cidrSubred; $i -lt 32; $i++) {
-            $mascaraTmp = $mascaraTmp * 2
-        }
-        
-        $red1 = $ip1Dec -band $mascaraTmp
-        $red2 = $ip2Dec -band $mascaraTmp
-        
-        if ($red1 -eq $red2) {
-            break
-        }
-    }
-    
-    # Elegir el CIDR que cumpla AMBAS condiciones
-    $cidrFinal = [Math]::Min($cidrHosts, $cidrSubred)
-    
-    Write-Host "CIDR necesario por hosts: /$cidrHosts"
-    Write-Host "CIDR necesario por subred: /$cidrSubred"
-    Write-Host "CIDR final seleccionado: /$cidrFinal"
-    
-    # Calcular mascara en formato decimal
-    $mascaraDec = 0
-    for ($i = 0; $i -lt $cidrFinal; $i++) {
-        $mascaraDec = ($mascaraDec * 2) + 1
-    }
-    for ($i = $cidrFinal; $i -lt 32; $i++) {
-        $mascaraDec = $mascaraDec * 2
-    }
-    
-    $mascara = ConvertFrom-IpDecimal -Decimal $mascaraDec
-    
-    # Calcular hosts disponibles
-    $bitsFinales = 32 - $cidrFinal
-    $hostsFinales = [Math]::Pow(2, $bitsFinales) - 2
-    
-    Write-Host "Mascara calculada: $mascara (CIDR: /$cidrFinal)"
-    Write-Host "Hosts disponibles: $hostsFinales"
-    
-    # Calcular broadcast
-    $redBase = $ip1Dec -band $mascaraDec
-    $global:broadcast = ConvertFrom-IpDecimal -Decimal ($redBase -bor (-bnot $mascaraDec -band 0xFFFFFFFF))
-    
-    Write-Host "Broadcast de la subred: $($global:broadcast)"
-    Write-Host "Mascara de subred determinada: $mascara"
-    
-    return @{
-        Mascara = $mascara
-        CIDR = $cidrFinal
-        Broadcast = $global:broadcast
-    }
-}
-
-# ============================================================================
-# FUNCION: Validar formato de IP
-# ============================================================================
-function Validar-IP {
-    param(
-        [string]$IP,
-        [string]$Tipo = "host"
-    )
-    
-    # Verificar formato basico
-    if ($IP -notmatch '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$') {
-        Write-ColorOutput "Direccion IP invalida, debe tener formato X.X.X.X" "Error"
+    # Validar formato X.X.X.X solo con números
+    if ($ip -notmatch '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$') {
+        Write-Host "Direccion IP invalida, tiene que contener un formato X.X.X.X unicamente con numeros positivos" -ForegroundColor $rojo
         return $false
     }
     
-    $octetos = $IP.Split('.')
+    # Separar octetos
+    $octetos = $ip -split '\.'
+    $a = [int]$octetos[0]
+    $b = [int]$octetos[1]
+    $c = [int]$octetos[2]
+    $d = [int]$octetos[3]
     
-    if ($octetos.Count -ne 4) {
-        Write-ColorOutput "ERROR: Debe tener exactamente 4 octetos." "Error"
+    # Validar que primer y último octeto no sean 0
+    if ($a -eq 0 -or $d -eq 0) {
+        Write-Host "Direccion IP invalida, no puede ser 0.X.X.X ni X.X.X.0" -ForegroundColor $rojo
         return $false
     }
     
     # Validar cada octeto
     foreach ($octeto in $octetos) {
-        # Verificar ceros a la izquierda
-        if ($octeto.Length -gt 1 -and $octeto.StartsWith('0')) {
-            Write-ColorOutput "ERROR: Octeto '$octeto' no puede tener ceros a la izquierda" "Error"
+        # Validar que no tenga 0 a la izquierda
+        if ($octeto.Length -gt 1 -and $octeto.StartsWith("0")) {
+            Write-Host "Direccion IP invalida, no se pueden poner 0 a la izquierda a menos que sea 0" -ForegroundColor $rojo
             return $false
         }
         
-        $num = [int]$octeto
-        if ($num -lt 0 -or $num -gt 255) {
-            Write-ColorOutput "ERROR: Octeto '$octeto' fuera de rango (0-255)." "Error"
+        # Validar rango 0-255
+        $valor = [int]$octeto
+        if ($valor -lt 0 -or $valor -gt 255) {
+            Write-Host "Direccion IP invalida, no puede ser mayor a 255 ni menor a 0" -ForegroundColor $rojo
             return $false
         }
     }
     
-    $primerOcteto = [int]$octetos[0]
-    $cuartoOcteto = [int]$octetos[3]
-    
-    # Validaciones especificas por tipo
-    if ($Tipo -eq "host") {
-        if ($primerOcteto -eq 0) {
-            Write-ColorOutput "ERROR: El primer octeto no puede ser 0 para una direccion host." "Error"
-            return $false
-        }
-        
-        if ($cuartoOcteto -eq 0) {
-            Write-ColorOutput "ERROR: El ultimo octeto no puede ser 0 para una direccion host." "Error"
-            return $false
-        }
-        
-        if ($cuartoOcteto -eq 255) {
-            Write-ColorOutput "ERROR: El ultimo octeto no puede ser 255 para una direccion host." "Error"
-            return $false
-        }
-        
-        if ($primerOcteto -eq 127) {
-            Write-ColorOutput "ERROR: 127.x.x.x es direccion loopback, no valida para host." "Error"
-            return $false
-        }
-        
-        if ($primerOcteto -ge 224 -and $primerOcteto -le 239) {
-            Write-ColorOutput "ERROR: $IP es direccion multicast (224-239.x.x.x)." "Error"
-            return $false
-        }
-        
-        if ($primerOcteto -ge 240) {
-            Write-ColorOutput "ERROR: $IP esta en rango reservado experimental (240-255.x.x.x)." "Error"
-            return $false
-        }
-    }
-    elseif ($Tipo -eq "gateway" -or $Tipo -eq "dns") {
-        if ($primerOcteto -ge 224 -and $primerOcteto -le 239) {
-            Write-ColorOutput "ERROR: $IP es direccion multicast, no valida para $Tipo." "Error"
-            return $false
-        }
-        
-        if ($primerOcteto -ge 240) {
-            Write-ColorOutput "ERROR: $IP esta en rango reservado experimental, no valida para $Tipo." "Error"
-            return $false
-        }
-        
-        if ($IP -eq "0.0.0.0") {
-            Write-ColorOutput "ADVERTENCIA: $IP puede no ser una direccion $Tipo valida en produccion." "Warning"
-        }
-    }
-    
-    return $true
-}
-
-# ============================================================================
-# FUNCION: Comparar IPs
-# ============================================================================
-function Comparar-IPs {
-    param(
-        [string]$IP1,
-        [string]$IP2
-    )
-    
-    $num1 = ConvertTo-IpDecimal -IpAddress $IP1
-    $num2 = ConvertTo-IpDecimal -IpAddress $IP2
-    
-    if ($num1 -ge $num2) {
-        Write-ColorOutput "ERROR: La IP inicial ($IP1) debe ser menor que la IP final ($IP2)." "Error"
+    # Validar que no sea 0.0.0.0 ni 255.255.255.255
+    if ($ip -eq "0.0.0.0" -or $ip -eq "255.255.255.255") {
+        Write-Host "Direccion IP invalida, no puede ser 0.0.0.0 ni 255.255.255.255" -ForegroundColor $rojo
         return $false
     }
     
+    # Validar rango de localhost (127.0.0.0-127.255.255.255)
+    if ($a -eq 127) {
+        Write-Host "Direccion IP invalida, las direcciones del rango 127.0.0.1 al 127.255.255.255 estan reservadas para host local" -ForegroundColor $rojo
+        return $false
+    }
+    
+    # Validar rango experimental (240.0.0.0-255.255.255.254)
+    if ($a -gt 240 -and $a -lt 255) {
+        Write-Host "Direccion IP invalida, las direcciones del rango 240.0.0.0 al 255.255.255.254 estan reservadas para usos experimentales" -ForegroundColor $rojo
+        return $false
+    }
+    
+    # Validar rango multicast (224.0.0.0-239.255.255.255)
+    if ($a -ge 224 -and $a -le 239) {
+        Write-Host "Direccion IP invalida, las direcciones del rango 224.0.0.0 al 239.255.255.255 estan reservadas para multicast" -ForegroundColor $rojo
+        return $false
+    }
+    
+    # IP válida
     return $true
 }
 
-# ============================================================================
-# FUNCION: Verificar instalacion de rol DHCP
-# ============================================================================
-function Verificar-Instalacion {
-    Write-Host ""
-    Write-ColorOutput "VERIFICANDO INSTALACION DEL ROL DHCP"
-    Write-Host ""
+function validarMascara {
+    param(
+        [string]$masc
+    )
     
-    $dhcpRole = Get-WindowsFeature -Name DHCP -ErrorAction SilentlyContinue
+    # Validar formato
+    if ($masc -notmatch '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$') {
+        Write-Host "Mascara invalida" -ForegroundColor $rojo
+        return $false
+    }
     
-    if ($dhcpRole -and $dhcpRole.Installed) {
-        Write-ColorOutput "El rol DHCP ya esta instalado." "Success"
-        
-        # Verificar si el servicio esta corriendo
-        $dhcpService = Get-Service -Name DHCPServer -ErrorAction SilentlyContinue
-        if ($dhcpService) {
-            Write-Host "Estado del servicio: $($dhcpService.Status)"
-        }
+    # Máscaras válidas
+    $mascarasValidas = @(
+        "255.0.0.0", "255.128.0.0", "255.192.0.0", "255.224.0.0",
+        "255.240.0.0", "255.248.0.0", "255.252.0.0", "255.254.0.0",
+        "255.255.0.0", "255.255.128.0", "255.255.192.0", "255.255.224.0",
+        "255.255.240.0", "255.255.248.0", "255.255.252.0", "255.255.254.0",
+        "255.255.255.0", "255.255.255.128", "255.255.255.192", "255.255.255.224",
+        "255.255.255.240", "255.255.255.248", "255.255.255.252"
+    )
+    
+    if ($mascarasValidas -contains $masc) {
+        return $true
     }
     else {
-        Write-ColorOutput "El rol DHCP NO esta instalado." "Warning"
+        Write-Host "Mascara no valida" -ForegroundColor $rojo
+        return $false
     }
-    
-    Write-Host ""
-    Read-Host "Presione Enter para continuar"
 }
 
-# ============================================================================
-# FUNCION: Instalar rol DHCP
-# ============================================================================
-function Instalar-DHCP {
-    Write-Host ""
-    Write-ColorOutput "INSTALANDO ROL DHCP"
-    Write-Host ""
+function calcularRango {
+    param(
+        [string]$ip1,
+        [string]$ip2
+    )
     
-    $dhcpRole = Get-WindowsFeature -Name DHCP
+    $oct1 = $ip1 -split '\.'
+    $oct2 = $ip2 -split '\.'
     
-    if ($dhcpRole.Installed) {
-        Write-ColorOutput "El rol DHCP ya esta instalado." "Success"
+    $num1 = ([int]$oct1[0] * 16777216) + ([int]$oct1[1] * 65536) + ([int]$oct1[2] * 256) + [int]$oct1[3]
+    $num2 = ([int]$oct2[0] * 16777216) + ([int]$oct2[1] * 65536) + ([int]$oct2[2] * 256) + [int]$oct2[3]
+    
+    return [Math]::Abs($num2 - $num1)
+}
+
+function calcularMascara {
+    param(
+        [string]$ipIni,
+        [string]$ipFin
+    )
+    
+    $rango = calcularRango -ip1 $ipIni -ip2 $ipFin
+    
+    # Máscaras comunes según rango
+    if ($rango -le 254) { return "255.255.255.0" }
+    elseif ($rango -le 510) { return "255.255.254.0" }
+    elseif ($rango -le 1022) { return "255.255.252.0" }
+    elseif ($rango -le 2046) { return "255.255.248.0" }
+    elseif ($rango -le 4094) { return "255.255.240.0" }
+    elseif ($rango -le 8190) { return "255.255.224.0" }
+    elseif ($rango -le 16382) { return "255.255.192.0" }
+    elseif ($rango -le 32766) { return "255.255.128.0" }
+    elseif ($rango -le 65534) { return "255.255.0.0" }
+    else { return "255.0.0.0" }
+}
+
+function validarIPMascara {
+    param(
+        [string]$ipIni,
+        [string]$ipFin,
+        [string]$masc
+    )
+    
+    $octIni = $ipIni -split '\.'
+    $octFin = $ipFin -split '\.'
+    $octMasc = $masc -split '\.'
+    
+    # Calcular red de ambas IPs
+    $redIni = @()
+    $redFin = @()
+    
+    for ($i = 0; $i -lt 4; $i++) {
+        $redIni += [int]$octIni[$i] -band [int]$octMasc[$i]
+        $redFin += [int]$octFin[$i] -band [int]$octMasc[$i]
+    }
+    
+    $redIniStr = $redIni -join '.'
+    $redFinStr = $redFin -join '.'
+    
+    if ($redIniStr -eq $redFinStr) {
+        return $true
     }
     else {
-        Write-ColorOutput "Instalando rol DHCP..." "Info"
+        Write-Host "Las IPs no pertenecen a la misma red con la mascara proporcionada" -ForegroundColor $rojo
+        return $false
+    }
+}
+
+function calcularBits {
+    param(
+        [string]$masc
+    )
+    
+    $octetos = $masc -split '\.'
+    $bits = 0
+    
+    foreach ($oct in $octetos) {
+        $num = [int]$oct
+        while ($num -gt 0) {
+            if ($num -band 1) { $bits++ }
+            $num = $num -shr 1
+        }
+    }
+    
+    return $bits
+}
+
+function configuracionDHCP {
+    Write-Host "`n=== Configuracion de DHCP ===" -ForegroundColor $amarillo
+    
+    # Variables locales
+    $ipValida = $false
+    $usoMas = $false
+    $comp = $false
+
+    Write-Host "`nConfiguracion Dinamica`n" -ForegroundColor $azul
+
+    # Nombre del scope
+    $scope = Read-Host "Nombre descriptivo del Ambito"
+
+    # Máscara
+    $mascValida = $false
+    do {
+        $mascara = Read-Host "Mascara (En blanco para asignar automaticamente)"
+        if ($mascara -ne "") {
+            if (validarMascara -masc $mascara) {
+                $usoMas = $true
+                $mascValida = $true
+            }
+        }
+        else {
+            $mascValida = $true
+        }
+    } while (-not $mascValida)
+
+    # IP Inicial
+    $ipValida = $false
+    do {
+        $ipInicial = Read-Host "Rango inicial de la IP"
         
-        try {
-            Install-WindowsFeature -Name DHCP -IncludeManagementTools
-            Write-ColorOutput "Instalacion completada exitosamente." "Success"
+        if (validar_IP -ip $ipInicial) {
+            $ipValida = $true
+        }
+        
+        if (-not $ipValida) {
+            Write-Host "Intentando nuevamente..." -ForegroundColor $amarillo
+        }
+    } while (-not $ipValida)
+
+    # IP Final
+    $ipValida = $false
+    do {
+        $ipFinal = Read-Host "Rango final de la IP"
+        
+        if (validar_IP -ip $ipFinal) {
+            $rango = calcularRango -ip1 $ipInicial -ip2 $ipFinal
             
-            # Configurar grupo de seguridad
-            netsh dhcp add securitygroups
+            if ($rango -gt 2) {
+                if ($usoMas) {
+                    if (validarIPMascara -ipIni $ipInicial -ipFin $ipFinal -masc $mascara) {
+                        $ipValida = $true
+                    }
+                }
+                else {
+                    $mascara = calcularMascara -ipIni $ipInicial -ipFin $ipFinal
+                    Write-Host "Mascara calculada automaticamente: $mascara" -ForegroundColor $verde
+                    $ipValida = $true
+                }
+            }
+            else {
+                Write-Host "El rango debe ser mayor a 2 IPs" -ForegroundColor $rojo
+            }
+        }
+        
+        if (-not $ipValida) {
+            Write-Host "Intentando nuevamente..." -ForegroundColor $amarillo
+        }
+    } while (-not $ipValida)
+
+    # Tiempo de sesión
+    do {
+        $leaseTime = Read-Host "Tiempo de la sesion (segundos)"
+        $leaseTimeNum = $leaseTime -as [int]
+        
+        if ($null -eq $leaseTimeNum -or $leaseTimeNum -le 0) {
+            Write-Host "Debe ingresar un numero positivo" -ForegroundColor $rojo
+            $leaseTimeValido = $false
+        }
+        else {
+            $leaseTimeValido = $true
+        }
+    } while (-not $leaseTimeValido)
+
+    # Gateway - Calcular automáticamente
+    $octetos = $ipInicial -split '\.'
+    $ultimoOcteto = [int]$octetos[3]
+    
+    if ($ultimoOcteto -eq 1) {
+        $gatewaySugerido = "$($octetos[0]).$($octetos[1]).$($octetos[2]).254"
+    }
+    else {
+        $gatewaySugerido = "$($octetos[0]).$($octetos[1]).$($octetos[2]).1"
+    }
+    
+    $comp = $false
+    do {
+        Write-Host "Gateway sugerido: " -NoNewline -ForegroundColor $amarillo
+        Write-Host $gatewaySugerido -ForegroundColor $verde
+        $gateway = Read-Host "Gateway (Enter para usar sugerido, vacio para omitir)"
+        
+        if ($gateway -eq "") {
+            $usarSugerido = Read-Host "Usar gateway sugerido? (s/N)"
+            if ($usarSugerido -match '^[Ss]$') {
+                $gateway = $gatewaySugerido
+            }
+            else {
+                $gateway = ""
+                Write-Host "Sin gateway - red aislada" -ForegroundColor $amarillo
+            }
+            $comp = $true
+        }
+        elseif (validar_IP -ip $gateway) {
+            $comp = $true
+        }
+        
+        if (-not $comp) {
+            Write-Host "Intentando nuevamente..." -ForegroundColor $amarillo
+        }
+    } while (-not $comp)
+
+    # DNS Principal
+    $comp = $false
+    do {
+        $dns = Read-Host "DNS principal (puede quedar vacio)"
+        
+        if ($dns -eq "") {
+            $comp = $true
+            $dnsAlt = ""
+        }
+        elseif (validar_IP -ip $dns) {
+            $comp = $true
+        }
+        
+        if (-not $comp) {
+            Write-Host "Intentando nuevamente..." -ForegroundColor $amarillo
+        }
+    } while (-not $comp)
+
+    # DNS Alternativo - solo si hay DNS principal
+    if ($dns -ne "") {
+        $comp = $false
+        do {
+            $dnsAlt = Read-Host "DNS alternativo (puede quedar vacio)"
+            
+            if ($dnsAlt -eq "") {
+                $comp = $true
+            }
+            elseif (validar_IP -ip $dnsAlt) {
+                $comp = $true
+            }
+            
+            if (-not $comp) {
+                Write-Host "Intentando nuevamente..." -ForegroundColor $amarillo
+            }
+        } while (-not $comp)
+    }
+    else {
+        $dnsAlt = ""
+    }
+
+    # Mostrar interfaces de red disponibles
+    Write-Host "`nInterfaces de red disponibles:" -ForegroundColor $amarillo
+    Get-NetAdapter | Where-Object {$_.Status -eq "Up"} | Select-Object Name, InterfaceDescription | Format-Table -AutoSize
+    $interfaz = Read-Host "Ingrese el nombre de la interfaz de red a usar"
+
+    # Resumen de configuración
+    Write-Host "`nLa configuracion final es:" -ForegroundColor $azul
+    Write-Host "Nombre del ambito: " -NoNewline; Write-Host $scope -ForegroundColor $verde
+    Write-Host "Mascara: " -NoNewline; Write-Host $mascara -ForegroundColor $verde
+    Write-Host "IP inicial: " -NoNewline; Write-Host $ipInicial -ForegroundColor $verde
+    Write-Host "IP final: " -NoNewline; Write-Host $ipFinal -ForegroundColor $verde
+    Write-Host "Tiempo de consesion: " -NoNewline; Write-Host "$leaseTime segundos" -ForegroundColor $verde
+    Write-Host "Gateway: " -NoNewline; Write-Host $(if($gateway -eq ""){"(sin gateway)"}else{$gateway}) -ForegroundColor $verde
+    Write-Host "DNS primario: " -NoNewline; Write-Host $(if($dns -eq ""){"(vacio)"}else{$dns}) -ForegroundColor $verde
+    Write-Host "DNS alternativo: " -NoNewline; Write-Host $(if($dnsAlt -eq ""){"(vacio)"}else{$dnsAlt}) -ForegroundColor $verde
+    Write-Host "Interfaz: " -NoNewline; Write-Host "$interfaz`n" -ForegroundColor $verde
+
+    $opc = Read-Host "Acepta esta configuracion? (y/n)"
+    
+    if ($opc -eq "y") {
+        try {
+            # Calcular la dirección de red correctamente
+            $octetosIP = $ipInicial -split '\.'
+            $octetosMasc = $mascara -split '\.'
+            
+            # AND bit a bit entre IP y máscara para obtener la red
+            $red = @()
+            for ($i = 0; $i -lt 4; $i++) {
+                $red += [int]$octetosIP[$i] -band [int]$octetosMasc[$i]
+            }
+            $redStr = $red -join '.'
+            
+            # Calcular broadcast
+            $broadcast = @()
+            for ($i = 0; $i -lt 4; $i++) {
+                $broadcast += [int]$octetosIP[$i] -bor (255 - [int]$octetosMasc[$i])
+            }
+            $broadcastStr = $broadcast -join '.'
+            
+            Write-Host "`nRed calculada: $redStr" -ForegroundColor $amarillo
+            Write-Host "Broadcast calculado: $broadcastStr" -ForegroundColor $amarillo
+            
+            # Crear el scope
+            Write-Host "`nCreando scope DHCP..." -ForegroundColor $amarillo
+            Add-DhcpServerv4Scope `
+                -Name $scope `
+                -StartRange $ipInicial `
+                -EndRange $ipFinal `
+                -SubnetMask $mascara `
+                -State Active
+            
+            Write-Host "Scope creado exitosamente" -ForegroundColor $verde
+            
+            # Configurar Gateway (Opción 3) - solo si existe
+            if ($gateway -ne "") {
+                Write-Host "Configurando Gateway..." -ForegroundColor $amarillo
+                Set-DhcpServerv4OptionValue -ScopeId $redStr -OptionId 3 -Value $gateway
+            }
+            
+            # Configurar DNS (Opción 6)
+            if ($dns -ne "" -and $dnsAlt -ne "") {
+                Write-Host "Configurando DNS principal y alternativo..." -ForegroundColor $amarillo
+                Set-DhcpServerv4OptionValue -ScopeId $redStr -OptionId 6 -Value @($dns, $dnsAlt)
+            }
+            elseif ($dns -ne "") {
+                Write-Host "Configurando DNS principal..." -ForegroundColor $amarillo
+                Set-DhcpServerv4OptionValue -ScopeId $redStr -OptionId 6 -Value $dns
+            }
+            
+            # Configurar tiempo de concesión
+            Write-Host "Configurando tiempo de concesion..." -ForegroundColor $amarillo
+            $duracion = New-TimeSpan -Seconds $leaseTime
+            Set-DhcpServerv4Scope -ScopeId $redStr -LeaseDuration $duracion
+            
+            # Reiniciar servicio DHCP
+            Write-Host "`nReiniciando servicio DHCP..." -ForegroundColor $amarillo
             Restart-Service DHCPServer
             
-            Write-ColorOutput "Servicio DHCP iniciado." "Success"
+            # Verificar estado del servicio
+            Start-Sleep -Seconds 2
+            $servicioEstado = Get-Service DHCPServer
+            
+            if ($servicioEstado.Status -eq "Running") {
+                Write-Host "`n¡Servidor DHCP configurado y funcionando correctamente!" -ForegroundColor $verde
+                Write-Host "`nDetalles del Scope:" -ForegroundColor $azul
+                Get-DhcpServerv4Scope -ScopeId $redStr | Format-List
+            }
+            else {
+                Write-Host "`nError al iniciar el servicio DHCP" -ForegroundColor $rojo
+                Write-Host "Estado del servicio:" -ForegroundColor $amarillo
+                Get-Service DHCPServer | Format-List
+            }
         }
         catch {
-            Write-ColorOutput "Error al instalar el rol DHCP: $_" "Error"
+            Write-Host "`nError durante la configuracion: $_" -ForegroundColor $rojo
+            Write-Host "Detalles: $($_.Exception.Message)" -ForegroundColor $amarillo
+        }
+    }
+    else {
+        Write-Host "`nConfiguracion cancelada" -ForegroundColor $amarillo
+        Write-Host "Volviendo al menu..." -ForegroundColor $amarillo
+        Start-Sleep -Seconds 2
+    }
+}
+
+function configuracionDHCP_Predeterminada {
+    Write-Host "`nAplicando configuracion predeterminada de DHCP..." -ForegroundColor $verde
+    
+    try {
+        # Parámetros predeterminados
+        $scope = "Red Predeterminada"
+        $ipInicial = "192.168.1.100"
+        $ipFinal = "192.168.1.200"
+        $mascara = "255.255.255.0"
+        $gateway = "192.168.1.1"
+        $dns = "8.8.8.8"
+        $dnsAlt = "8.8.4.4"
+        $leaseTime = 600
+        $redStr = "192.168.1.0"
+        
+        Write-Host "Red: 192.168.1.0/24" -ForegroundColor $azul
+        Write-Host "Rango DHCP: 192.168.1.100 - 192.168.1.200" -ForegroundColor $azul
+        Write-Host "Gateway: 192.168.1.1" -ForegroundColor $azul
+        Write-Host "DNS: 8.8.8.8, 8.8.4.4`n" -ForegroundColor $azul
+        
+        # Crear scope
+        Add-DhcpServerv4Scope `
+            -Name $scope `
+            -StartRange $ipInicial `
+            -EndRange $ipFinal `
+            -SubnetMask $mascara `
+            -State Active
+        
+        # Configurar opciones
+        Set-DhcpServerv4OptionValue -ScopeId $redStr -OptionId 3 -Value $gateway
+        Set-DhcpServerv4OptionValue -ScopeId $redStr -OptionId 6 -Value @($dns, $dnsAlt)
+        
+        $duracion = New-TimeSpan -Seconds $leaseTime
+        Set-DhcpServerv4Scope -ScopeId $redStr -LeaseDuration $duracion
+        
+        # Reiniciar servicio
+        Restart-Service DHCPServer
+        Start-Sleep -Seconds 2
+        
+        Write-Host "Configuracion predeterminada aplicada exitosamente" -ForegroundColor $verde
+        Get-DhcpServerv4Scope -ScopeId $redStr | Format-List
+    }
+    catch {
+        Write-Host "Error al aplicar configuracion predeterminada: $_" -ForegroundColor $rojo
+    }
+}
+
+function instalacionDHCP {
+    Write-Host "`n=== Instalacion de DHCP Server ===" -ForegroundColor $amarillo
+    
+    # Verificar si ya está instalado
+    $dhcpEstado = Get-WindowsFeature -Name DHCP
+    
+    if ($dhcpEstado.InstallState -eq "Installed") {
+        Write-Host "DHCP server ya esta instalado" -ForegroundColor $azul
+    }
+    else {
+        Write-Host "DHCP server no esta instalado, iniciando instalacion..." -ForegroundColor $amarillo
+        
+        try {
+            # Instalar en segundo plano con animación
+            $job = Start-Job -ScriptBlock {
+                Install-WindowsFeature -Name DHCP -IncludeManagementTools
+            }
+            
+            Write-Host -NoNewline "DHCP se esta instalando"
+            while ($job.State -eq "Running") {
+                Write-Host -NoNewline "."
+                Start-Sleep -Milliseconds 500
+            }
+            Write-Host ""
+            
+            $result = Receive-Job -Job $job
+            Remove-Job -Job $job
+            
+            if ($result.Success) {
+                Write-Host "DHCP server instalado correctamente" -ForegroundColor $verde
+            }
+            else {
+                Write-Host "Error en la instalacion de DHCP" -ForegroundColor $rojo
+                return
+            }
+        }
+        catch {
+            Write-Host "Error durante la instalacion: $_" -ForegroundColor $rojo
             return
         }
     }
     
-    Configurar-DHCP
-}
-
-# ============================================================================
-# FUNCION: Configurar servidor DHCP
-# ============================================================================
-function Configurar-DHCP {
-    Write-Host ""
-    Write-ColorOutput "CONFIGURACION DHCP DINAMICA"
     Write-Host ""
     
-    # Nombre del ambito
-    $global:scope = Read-Host "Nombre descriptivo del ambito"
+    # Verificar si existe configuración previa
+    $scopesExistentes = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue
     
-    # IP inicial (sera la IP del servidor)
-    do {
-        $global:ipInicial = Read-Host "Rango inicial de la IP"
-        $valido = Validar-IP -IP $global:ipInicial -Tipo "host"
+    if ($scopesExistentes) {
+        Write-Host "Se detectó una configuracion previa de DHCP" -ForegroundColor $amarillo
+        Write-Host "Scopes existentes:" -ForegroundColor $amarillo
+        $scopesExistentes | Format-Table -AutoSize
         
-        if ($valido) {
-            $global:ipServidor = $global:ipInicial
-            
-            # Incrementar IP inicial para el rango DHCP
-            $octetos = $global:ipInicial.Split('.')
-            $octetos[3] = ([int]$octetos[3] + 1).ToString()
-            $global:ipInicial = $octetos -join '.'
-        }
-    } while (-not $valido)
-    
-    # IP final
-    do {
-        $global:ipFinal = Read-Host "Rango final de la IP"
-        $valido = (Validar-IP -IP $global:ipFinal -Tipo "host") -and 
-                  (Comparar-IPs -IP1 $global:ipInicial -IP2 $global:ipFinal)
-    } while (-not $valido)
-    
-    # Calcular mascara automaticamente
-    Write-Host ""
-    $resultadoMascara = Calcular-Mascara -IpInicial $global:ipInicial -IpFinal $global:ipFinal
-    
-    if ($null -eq $resultadoMascara) {
-        Write-ColorOutput "ERROR: No se pudo calcular una mascara. Usando valor por defecto." "Error"
-        $global:mascara = "255.255.255.0"
-    }
-    else {
-        $global:mascara = $resultadoMascara.Mascara
-        Write-Host "Mascara de subred determinada: $($global:mascara)"
-    }
-    Write-Host ""
-    
-    # Tiempo de sesion (en segundos para Windows)
-    do {
-        $tiempoMinutos = Read-Host "Tiempo de la sesion (en minutos)"
+        $sobreescribir = Read-Host "`nDeseas sobreescribir la configuracion existente? (s/N)"
         
-        if ([string]::IsNullOrWhiteSpace($tiempoMinutos)) {
-            Write-ColorOutput "ERROR: El tiempo de sesion no puede estar vacio." "Error"
-            $valido = $false
-        }
-        elseif ($tiempoMinutos -notmatch '^\d+$') {
-            Write-ColorOutput "ERROR: El tiempo de sesion debe ser un numero positivo." "Error"
-            $valido = $false
-        }
-        elseif ([int]$tiempoMinutos -le 0) {
-            Write-ColorOutput "ERROR: El tiempo de sesion debe ser mayor a 0." "Error"
-            $valido = $false
-        }
-        elseif ([int]$tiempoMinutos -gt 43200) {
-            Write-ColorOutput "ERROR: El tiempo de sesion no puede ser mayor a 43200 minutos (30 dias)." "Error"
-            $valido = $false
-        }
-        else {
-            $global:tiempoSesion = [int]$tiempoMinutos
-            $valido = $true
-        }
-    } while (-not $valido)
-    
-    # Gateway (opcional)
-    do {
-        $global:gateway = Read-Host "Gateway (OPCIONAL, presiona Enter para omitir)"
-        
-        if ([string]::IsNullOrWhiteSpace($global:gateway) -or $global:gateway -eq "none") {
-            $global:gateway = ""
-            $valido = $true
-        }
-        else {
-            $valido = Validar-IP -IP $global:gateway -Tipo "gateway"
-        }
-    } while (-not $valido)
-    
-    # DNS primario (opcional)
-    do {
-        $global:dnsPrimario = Read-Host "DNS primario (OPCIONAL, presiona Enter para omitir)"
-        
-        if ([string]::IsNullOrWhiteSpace($global:dnsPrimario) -or $global:dnsPrimario -eq "none") {
-            $global:dnsPrimario = ""
-            $valido = $true
-        }
-        else {
-            $valido = Validar-IP -IP $global:dnsPrimario -Tipo "dns"
-        }
-    } while (-not $valido)
-    
-    # DNS secundario (si se proporciono primario)
-    if (-not [string]::IsNullOrWhiteSpace($global:dnsPrimario)) {
-        do {
-            $respuesta = Read-Host "Desea agregar un DNS secundario? (s/n)"
-            
-            if ($respuesta -eq 's') {
-                do {
-                    $global:dnsSecundario = Read-Host "DNS secundario"
-                    $valido = Validar-IP -IP $global:dnsSecundario -Tipo "dns"
-                } while (-not $valido)
-                break
-            }
-            elseif ($respuesta -eq 'n') {
-                $global:dnsSecundario = ""
-                break
-            }
-            else {
-                Write-ColorOutput "Por favor ingrese 's' o 'n'." "Warning"
-            }
-        } while ($true)
-    }
-    else {
-        Write-Host "No se agrego un DNS primario."
-    }
-    
-    # Mostrar interfaces disponibles
-    Write-Host ""
-    Write-ColorOutput "Interfaces de red disponibles:"
-    $interfaces = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
-    $interfaces | Format-Table -Property InterfaceIndex, Name, InterfaceDescription, Status
-    
-    do {
-        $interfaceIndex = Read-Host "Ingrese el numero de indice de la interfaz (InterfaceIndex)"
-        $global:interfaz = $interfaces | Where-Object { $_.InterfaceIndex -eq $interfaceIndex }
-        
-        if ($null -eq $global:interfaz) {
-            Write-ColorOutput "Interfaz no valida. Intente de nuevo." "Error"
-        }
-    } while ($null -eq $global:interfaz)
-    
-    # Mostrar configuracion final
-    Write-Host ""
-    Write-ColorOutput "LA CONFIGURACION FINAL ES:"
-    Write-Host "Nombre del ambito: $($global:scope)"
-    Write-Host "Mascara: $($global:mascara)"
-    Write-Host "IP del servidor: $($global:ipServidor)"
-    Write-Host "IP inicial (rango DHCP): $($global:ipInicial)"
-    Write-Host "IP final (rango DHCP): $($global:ipFinal)"
-    Write-Host "Tiempo de sesion: $($global:tiempoSesion) minutos"
-    
-    if ([string]::IsNullOrWhiteSpace($global:gateway)) {
-        Write-Host "Gateway: [No configurado]"
-    } else {
-        Write-Host "Gateway: $($global:gateway)"
-    }
-    
-    if ([string]::IsNullOrWhiteSpace($global:dnsPrimario)) {
-        Write-Host "DNS primario: [No configurado]"
-    } else {
-        Write-Host "DNS primario: $($global:dnsPrimario)"
-    }
-    
-    if ([string]::IsNullOrWhiteSpace($global:dnsSecundario)) {
-        Write-Host "DNS alternativo: [No configurado]"
-    } else {
-        Write-Host "DNS alternativo: $($global:dnsSecundario)"
-    }
-    
-    Write-Host "Interfaz: $($global:interfaz.Name) (Index: $($global:interfaz.InterfaceIndex))"
-    Write-Host ""
-    
-    # Advertencia si la IP del servidor esta en el rango DHCP
-    $servidorNum = ConvertTo-IpDecimal -IpAddress $global:ipServidor
-    $inicioNum = ConvertTo-IpDecimal -IpAddress $global:ipInicial
-    $finalNum = ConvertTo-IpDecimal -IpAddress $global:ipFinal
-    
-    if ($servidorNum -ge $inicioNum -and $servidorNum -le $finalNum) {
-        Write-ColorOutput "ADVERTENCIA: La IP del servidor ($($global:ipServidor)) esta dentro del rango DHCP." "Warning"
-        Write-Host "   Esto puede causar conflictos. Se recomienda usar una IP fuera del rango."
-        Write-Host ""
-    }
-    
-    $confirmacion = Read-Host "Acepta esta configuracion? (s/n)"
-    
-    if ($confirmacion -eq 's') {
-        Aplicar-Configuracion
-    }
-    else {
-        Write-ColorOutput "Volviendo a configurar..." "Info"
-        Configurar-DHCP
-    }
-}
-
-# ============================================================================
-# FUNCION: Aplicar configuracion DHCP
-# ============================================================================
-function Aplicar-Configuracion {
-    Write-Host ""
-    Write-ColorOutput "APLICANDO CONFIGURACION"
-    Write-Host ""
-    
-    try {
-        # Calcular direccion de red
-        $octetos = $global:ipInicial.Split('.')
-        $mascaraOctetos = $global:mascara.Split('.')
-        
-        $red = @()
-        for ($i = 0; $i -lt 4; $i++) {
-            $red += ([int]$octetos[$i] -band [int]$mascaraOctetos[$i])
-        }
-        $redCalculada = $red -join '.'
-        
-        Write-Host "Red calculada: $redCalculada"
-        Write-Host "Broadcast calculado: $($global:broadcast)"
-        Write-Host ""
-        
-        # Configurar IP estatica en la interfaz
-        Write-ColorOutput "Configurando IP estatica en la interfaz..." "Info"
-        Configurar-InterfazRed
-        
-        # Verificar si el ambito ya existe
-        $scopeExistente = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue | 
-                         Where-Object { $_.Name -eq $global:scope -or $_.ScopeId -eq $redCalculada }
-        
-        if ($scopeExistente) {
-            Write-ColorOutput "El ambito '$($global:scope)' ya existe. Eliminando para recrear..." "Warning"
-            Remove-DhcpServerv4Scope -ScopeId $scopeExistente.ScopeId -Force
+        if ($sobreescribir -notmatch '^[Ss]$') {
+            Write-Host "Manteniendo configuracion existente" -ForegroundColor $azul
+            return
         }
         
-        # Crear ambito DHCP
-        Write-ColorOutput "Creando ambito DHCP..." "Info"
-        
-        $scopeParams = @{
-            Name = $global:scope
-            StartRange = $global:ipInicial
-            EndRange = $global:ipFinal
-            SubnetMask = $global:mascara
-            LeaseDuration = New-TimeSpan -Minutes $global:tiempoSesion
-            State = 'Active'
+        Write-Host "`nEliminando configuracion anterior..." -ForegroundColor $amarillo
+        foreach ($scope in $scopesExistentes) {
+            Remove-DhcpServerv4Scope -ScopeId $scope.ScopeId -Force
         }
-        
-        Add-DhcpServerv4Scope @scopeParams
-        Write-ColorOutput "Ambito DHCP creado exitosamente." "Success"
-        
-        # Configurar opciones del ambito
-        if (-not [string]::IsNullOrWhiteSpace($global:gateway)) {
-            Write-ColorOutput "Configurando Gateway: $($global:gateway)" "Info"
-            Set-DhcpServerv4OptionValue -ScopeId $redCalculada -Router $global:gateway
-        }
-        
-        if (-not [string]::IsNullOrWhiteSpace($global:dnsPrimario)) {
-            if (-not [string]::IsNullOrWhiteSpace($global:dnsSecundario)) {
-                Write-ColorOutput "Configurando servidores DNS: $($global:dnsPrimario), $($global:dnsSecundario)" "Info"
-                Set-DhcpServerv4OptionValue -ScopeId $redCalculada -DnsServer $global:dnsPrimario, $global:dnsSecundario
-            }
-            else {
-                Write-ColorOutput "Configurando servidor DNS: $($global:dnsPrimario)" "Info"
-                Set-DhcpServerv4OptionValue -ScopeId $redCalculada -DnsServer $global:dnsPrimario
-            }
-        }
-        
-        # Reiniciar servicio DHCP
-        Write-ColorOutput "Reiniciando servicio DHCP..." "Info"
-        Restart-Service DHCPServer
-        
-        Write-Host ""
-        Write-ColorOutput "═══════════════════════════════════════════" "Success"
-        Write-ColorOutput "  ✓ Servidor DHCP configurado exitosamente!" "Success"
-        Write-ColorOutput "═══════════════════════════════════════════" "Success"
-        Write-Host ""
-        Write-Host "Resumen de configuracion:"
-        Write-Host "  • Red: $redCalculada"
-        Write-Host "  • Rango DHCP: $($global:ipInicial) - $($global:ipFinal)"
-        Write-Host "  • IP del servidor: $($global:ipServidor)"
-        Write-Host "  • Interfaz: $($global:interfaz.Name)"
-        Write-Host "  • Gateway: $(if ([string]::IsNullOrWhiteSpace($global:gateway)) { '[No configurado]' } else { $global:gateway })"
-        Write-Host "  • DNS: $(if ([string]::IsNullOrWhiteSpace($global:dnsPrimario)) { '[No configurado]' } else { $global:dnsPrimario })"
-        Write-Host ""
-        
-        # Mostrar estado del servicio
-        Get-Service DHCPServer | Format-List
-        
-        # Mostrar ambitos configurados
-        Write-ColorOutput "Ambitos DHCP configurados:" "Info"
-        Get-DhcpServerv4Scope | Format-Table -Property ScopeId, Name, State, StartRange, EndRange
-    }
-    catch {
-        Write-ColorOutput "═══════════════════════════════════════════" "Error"
-        Write-ColorOutput "  ✗ Error al configurar el servidor DHCP" "Error"
-        Write-ColorOutput "═══════════════════════════════════════════" "Error"
-        Write-Host ""
-        Write-ColorOutput "Detalles del error: $_" "Error"
     }
     
     Write-Host ""
-    Read-Host "Presione Enter para continuar"
-}
-
-# ============================================================================
-# FUNCION: Configurar interfaz de red con IP estatica
-# ============================================================================
-function Configurar-InterfazRed {
-    Write-Host ""
-    Write-ColorOutput "Configurando IP estatica $($global:ipServidor) en interfaz $($global:interfaz.Name)..." "Info"
+    
+    # Preguntar tipo de configuración
+    Write-Host "Deseas configurar DHCP manualmente o usar configuracion predeterminada?" -ForegroundColor $amarillo
+    Write-Host "1) Configurar manualmente"
+    Write-Host "2) Usar configuracion predeterminada"
     Write-Host ""
     
-    # Calcular prefijo CIDR
-    $cidr = 0
-    $mascaraOctetos = $global:mascara.Split('.')
-    foreach ($octeto in $mascaraOctetos) {
-        $bits = [Convert]::ToString([int]$octeto, 2)
-        $cidr += ($bits.ToCharArray() | Where-Object { $_ -eq '1' }).Count
-    }
-    
-    Write-Host "Configuracion actual:"
-    Get-NetIPAddress -InterfaceIndex $global:interfaz.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | 
-        Format-Table -Property IPAddress, PrefixLength
-    Write-Host ""
-    
-    # Eliminar configuraciones IP existentes
-    Write-ColorOutput "Eliminando configuraciones IP anteriores..." "Info"
-    $ipExistentes = Get-NetIPAddress -InterfaceIndex $global:interfaz.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
-    
-    foreach ($ip in $ipExistentes) {
-        try {
-            Remove-NetIPAddress -InterfaceIndex $global:interfaz.InterfaceIndex -IPAddress $ip.IPAddress -Confirm:$false -ErrorAction SilentlyContinue
-            Write-Host "  Eliminada IP: $($ip.IPAddress)"
-        }
-        catch {
-            # Ignorar errores al eliminar
-        }
-    }
-    
-    # Asignar nueva IP estatica
-    Write-ColorOutput "Asignando nueva IP estatica: $($global:ipServidor)/$cidr" "Info"
-    
-    try {
-        New-NetIPAddress -InterfaceIndex $global:interfaz.InterfaceIndex `
-                        -IPAddress $global:ipServidor `
-                        -PrefixLength $cidr `
-                        -DefaultGateway $null `
-                        -ErrorAction Stop
-        
-        Write-ColorOutput "IP estatica configurada exitosamente." "Success"
-    }
-    catch {
-        if ($_.Exception.Message -like "*already exists*") {
-            Write-ColorOutput "La IP ya existe en la interfaz. Continuando..." "Warning"
-        }
-        else {
-            Write-ColorOutput "Error al configurar IP: $_" "Error"
-        }
-    }
-    
-    # Verificacion final
-    Write-Host ""
-    Write-ColorOutput "Configuracion final de la interfaz:" "Info"
-    Get-NetIPAddress -InterfaceIndex $global:interfaz.InterfaceIndex -AddressFamily IPv4 | 
-        Format-Table -Property IPAddress, PrefixLength, InterfaceAlias
-    Write-Host ""
-}
-
-# ============================================================================
-# FUNCION: Reiniciar servicio DHCP
-# ============================================================================
-function Reiniciar-DHCP {
-    Write-Host ""
-    Write-ColorOutput "Reiniciando servidor DHCP..." "Info"
-    
-    $servicio = Get-Service -Name DHCPServer -ErrorAction SilentlyContinue
-    
-    if ($null -eq $servicio) {
-        Write-ColorOutput "El servicio DHCP no esta instalado." "Error"
-        Read-Host "Presione Enter para continuar"
-        return
-    }
-    
-    if ($servicio.Status -ne 'Running') {
-        Write-ColorOutput "El servicio DHCP no esta activo." "Warning"
-        $respuesta = Read-Host "Desea iniciarlo? (y/n)"
-        
-        if ($respuesta -eq 'y') {
-            Start-Service DHCPServer
-            Write-ColorOutput "Servicio DHCP iniciado." "Success"
-        }
-    }
-    else {
-        Restart-Service DHCPServer
-        Write-ColorOutput "Servicio DHCP reiniciado correctamente." "Success"
-    }
-    
-    Write-Host ""
-    Get-Service DHCPServer | Format-List
-    
-    Read-Host "Presione Enter para continuar"
-}
-
-# ============================================================================
-# FUNCION: Detener servicio DHCP
-# ============================================================================
-function Detener-DHCP {
-    Write-Host ""
-    Write-ColorOutput "Deteniendo servidor DHCP..." "Info"
-    
-    $servicio = Get-Service -Name DHCPServer -ErrorAction SilentlyContinue
-    
-    if ($null -eq $servicio) {
-        Write-ColorOutput "El servicio DHCP no esta instalado." "Error"
-        Read-Host "Presione Enter para continuar"
-        return
-    }
-    
-    if ($servicio.Status -ne 'Running') {
-        Write-ColorOutput "El servicio DHCP ya esta detenido." "Info"
-    }
-    else {
-        Stop-Service DHCPServer
-        Write-ColorOutput "Servidor DHCP detenido correctamente." "Success"
-    }
-    
-    Write-Host ""
-    Get-Service DHCPServer | Format-List
-    
-    Read-Host "Presione Enter para continuar"
-}
-
-# ============================================================================
-# FUNCION: Monitorear servidor DHCP
-# ============================================================================
-function Monitorear-DHCP {
-    Clear-Host
-    Write-Host "═══════════════════════════════════════════"
-    Write-Host "   MONITOR DEL SERVIDOR DHCP"
-    Write-Host "═══════════════════════════════════════════"
-    Write-Host ""
-    
-    # Verificar si el servicio esta activo
-    $servicio = Get-Service -Name DHCPServer -ErrorAction SilentlyContinue
-    
-    if ($null -eq $servicio) {
-        Write-ColorOutput "El servicio DHCP no esta instalado." "Error"
-        Read-Host "Presione Enter para volver al menu"
-        return
-    }
-    
-    if ($servicio.Status -ne 'Running') {
-        Write-ColorOutput "⚠ El servicio DHCP NO esta activo" "Warning"
-        Write-Host ""
-        Read-Host "Presione Enter para volver al menu"
-        return
-    }
-    
-    Write-ColorOutput "✓ Estado del servicio: ACTIVO" "Success"
-    Write-Host ""
-    
-    # Mostrar ambitos configurados
-    Write-ColorOutput "--- AMBITOS CONFIGURADOS ---" "Info"
-    $scopes = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue
-    
-    if ($scopes) {
-        $scopes | Format-Table -Property ScopeId, Name, State, StartRange, EndRange, LeaseDuration -AutoSize
-    }
-    else {
-        Write-Host "No hay ambitos configurados."
-    }
-    Write-Host ""
-    
-    # Mostrar IPs asignadas (leases)
-    Write-ColorOutput "--- IPS ASIGNADAS (LEASES) ---" "Info"
-    
-    foreach ($scope in $scopes) {
-        Write-Host "Ambito: $($scope.Name) ($($scope.ScopeId))"
-        
-        $leases = Get-DhcpServerv4Lease -ScopeId $scope.ScopeId -ErrorAction SilentlyContinue
-        
-        if ($leases) {
-            $leases | Format-Table -Property IPAddress, ClientId, HostName, AddressState, LeaseExpiryTime -AutoSize
-            Write-Host "Total de leases activos en este ambito: $($leases.Count)"
-        }
-        else {
-            Write-Host "  No hay leases activos en este ambito."
-        }
-        Write-Host ""
-    }
-    
-    # Estadisticas del servidor
-    Write-ColorOutput "--- ESTADISTICAS DEL SERVIDOR ---" "Info"
-    
-    foreach ($scope in $scopes) {
-        Write-Host "Estadisticas del ambito: $($scope.Name)"
-        
-        $stats = Get-DhcpServerv4ScopeStatistics -ScopeId $scope.ScopeId -ErrorAction SilentlyContinue
-        
-        if ($stats) {
-            Write-Host "  Direcciones en uso: $($stats.AddressesInUse)"
-            Write-Host "  Direcciones libres: $($stats.AddressesFree)"
-            Write-Host "  Direcciones pendientes: $($stats.PendingOffers)"
-            Write-Host "  Porcentaje en uso: $($stats.PercentageInUse)%"
-        }
-        Write-Host ""
-    }
-    
-    # Estado del servicio
-    Write-ColorOutput "--- ESTADO DEL SERVICIO ---" "Info"
-    Get-Service DHCPServer | Format-List
-    
-    Write-Host ""
-    Read-Host "Presione Enter para volver al menu"
-}
-
-# ============================================================================
-# FUNCION: Mostrar menu principal
-# ============================================================================
-function Mostrar-Menu {
-    Clear-Host
-    Write-Host "═══════════════════════════════════════════"
-    Write-Host "   SERVIDOR DHCP - WINDOWS SERVER 2025"
-    Write-Host "═══════════════════════════════════════════"
-    Write-Host " 1. Verificar instalacion"
-    Write-Host " 2. Instalacion completa (rol + configuracion)"
-    Write-Host " 3. Solo configurar/reconfigurar DHCP"
-    Write-Host " 4. Monitorear (IPs asignadas)"
-    Write-Host " 5. Reiniciar servicio"
-    Write-Host " 6. Detener servicio"
-    Write-Host " 7. Salir"
-    Write-Host "═══════════════════════════════════════════"
-    
-    $opcion = Read-Host " Seleccione una opcion [1-7]"
+    $opcion = Read-Host "Selecciona una opcion [1-2]"
     
     switch ($opcion) {
-        "1" { Verificar-Instalacion; Mostrar-Menu }
-        "2" { Instalar-DHCP; Mostrar-Menu }
-        "3" { Configurar-DHCP; Mostrar-Menu }
-        "4" { Monitorear-DHCP; Mostrar-Menu }
-        "5" { Reiniciar-DHCP; Mostrar-Menu }
-        "6" { Detener-DHCP; Mostrar-Menu }
-        "7" { 
-            Write-Host ""
-            Write-ColorOutput "Saliendo del script..." "Info"
-            exit 
+        "1" {
+            Write-Host "`nIniciando configuracion manual de DHCP..." -ForegroundColor $verde
+            configuracionDHCP
+        }
+        "2" {
+            configuracionDHCP_Predeterminada
         }
         default {
-            Write-ColorOutput "Opcion invalida" "Error"
+            Write-Host "Opcion no valida, usando configuracion predeterminada" -ForegroundColor $rojo
+            configuracionDHCP_Predeterminada
+        }
+    }
+    
+    Write-Host "`n=== Configuracion de DHCP completada ===" -ForegroundColor $verde
+}
+
+function verificar_Instalacion {
+    $dhcpEstado = Get-WindowsFeature -Name DHCP
+
+    if ($dhcpEstado.InstallState -eq "Installed") {
+        Write-Host "DHCP ya se encuentra instalado" -ForegroundColor $verde
+        
+        # Mostrar scopes existentes
+        $scopes = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue
+        if ($scopes) {
+            Write-Host "`nScopes configurados:" -ForegroundColor $azul
+            $scopes | Format-Table -AutoSize
+        }
+        
+        # Mostrar estado del servicio
+        $servicio = Get-Service DHCPServer
+        Write-Host "`nEstado del servicio:" -ForegroundColor $azul
+        Write-Host "Estado: " -NoNewline
+        if ($servicio.Status -eq "Running") {
+            Write-Host "Funcionando" -ForegroundColor $verde
+        }
+        else {
+            Write-Host "Detenido" -ForegroundColor $rojo
+        }
+    }
+    else {
+        Write-Host "DHCP no se encuentra instalado" -ForegroundColor $rojo
+        $opcc = Read-Host "`nDesea instalarlo? (S/N)"
+        
+        if ($opcc -match '^[Ss]$') {
+            instalacionDHCP
+        }
+        else {
+            Write-Host "Entendido, regresando al menu..." -ForegroundColor $amarillo
             Start-Sleep -Seconds 2
-            Mostrar-Menu
         }
     }
 }
 
-# ============================================================================
-# INICIO DEL SCRIPT
-# ============================================================================
-
-# Verificar que se ejecuta como administrador
-$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-$isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-
-if (-not $isAdmin) {
-    Write-ColorOutput "Este script debe ejecutarse como Administrador." "Error"
+function mostrarMenu {
+    Clear-Host
+    Write-Host "=====================================" -ForegroundColor $azul
+    Write-Host "   Gestion de Servidor DHCP" -ForegroundColor $verde
+    Write-Host "=====================================" -ForegroundColor $azul
     Write-Host ""
-    Write-Host "Haga clic derecho en PowerShell y seleccione 'Ejecutar como administrador'"
-    Read-Host "Presione Enter para salir"
-    exit
+    Write-Host "1. Verificar Instalacion" -ForegroundColor $amarillo
+    Write-Host "2. Instalar y Configurar DHCP" -ForegroundColor $amarillo
+    Write-Host "3. Configurar DHCP" -ForegroundColor $amarillo
+    Write-Host "4. Ver Scopes Activos" -ForegroundColor $amarillo
+    Write-Host "5. Salir" -ForegroundColor $amarillo
+    Write-Host ""
+    
+    $opcion = Read-Host "Selecciona una opcion"
+    
+    switch ($opcion) {
+        "1" {
+            verificar_Instalacion
+            Read-Host "`nPresiona Enter para continuar"
+            mostrarMenu
+        }
+        "2" {
+            instalacionDHCP
+            Read-Host "`nPresiona Enter para continuar"
+            mostrarMenu
+        }
+        "3" {
+            $dhcpEstado = Get-WindowsFeature -Name DHCP
+            if ($dhcpEstado.InstallState -eq "Installed") {
+                configuracionDHCP
+            }
+            else {
+                Write-Host "DHCP no esta instalado. Instálelo primero." -ForegroundColor $rojo
+            }
+            Read-Host "`nPresiona Enter para continuar"
+            mostrarMenu
+        }
+        "4" {
+            $scopes = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue
+            if ($scopes) {
+                $scopes | Format-Table -AutoSize
+            }
+            else {
+                Write-Host "No hay scopes configurados" -ForegroundColor $amarillo
+            }
+            Read-Host "`nPresiona Enter para continuar"
+            mostrarMenu
+        }
+        "5" {
+            Write-Host "`nSaliendo..." -ForegroundColor $verde
+            exit
+        }
+        default {
+            Write-Host "Opcion no valida" -ForegroundColor $rojo
+            Start-Sleep -Seconds 2
+            mostrarMenu
+        }
+    }
 }
 
-# Mostrar menu principal
-Mostrar-Menu
+# ---------- Main ----------
+param(
+    [switch]$v,
+    [switch]$i,
+    [switch]$c
+)
+
+if ($v) {
+    verificar_Instalacion
+}
+elseif ($i) {
+    instalacionDHCP
+}
+elseif ($c) {
+    configuracionDHCP
+}
+else {
+    mostrarMenu
+}
