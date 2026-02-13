@@ -536,9 +536,7 @@ EOF
 
 		# Verificar estado
 		if sudo systemctl is-active --quiet dhcpd; then
-			echo -e "═══════════════════════════════════════════"
 			echo -e "¡Servidor DHCP configurado exitosamente!"
-			echo -e "═══════════════════════════════════════════"
 			echo ""
 			echo -e "Resumen de configuración:"
 			echo -e " Red: $red/$( calcularBits "$mascara" )"
@@ -550,9 +548,7 @@ EOF
 			echo ""
 			sudo systemctl status dhcpd --no-pager
 		else
-			echo -e "═══════════════════════════════════════════"
 			echo -e "Error al iniciar el servicio DHCP"
-			echo -e "═══════════════════════════════════════════"
 			echo ""
 			echo -e "Ejecute el siguiente comando para ver detalles del error:"
 			echo -e "  sudo journalctl -xeu dhcpd.service"
@@ -604,155 +600,151 @@ verificarInstalacion(){
 }
 
 reiniciarDHCP(){
-    echo -e "Reiniciando servidor DHCP..."
+   echo -e "Reiniciando servidor DHCP..."
     
-    if ! systemctl is-active --quiet dhcpd; then
-        echo -e "El servicio DHCP no está activo"
-        read -p "¿Desea iniciarlo en lugar de reiniciarlo? (y/n): " opc
-        if [[ "$opc" = "y" ]]; then
-            sudo systemctl start dhcpd
-        else
-            return 1
-        fi
-    else
-        sudo systemctl restart dhcpd
-    fi
+   if ! systemctl is-active --quiet dhcpd; then
+      echo -e "El servicio DHCP no está activo"
+      read -p "¿Desea iniciarlo en lugar de reiniciarlo? (y/n): " opc
+      if [[ "$opc" = "y" ]]; then
+         sudo systemctl start dhcpd
+      else
+         return 1
+      fi
+   else
+      sudo systemctl restart dhcpd
+   fi
     
-    if systemctl is-active --quiet dhcpd; then
-        echo -e "Servidor DHCP reiniciado correctamente"
-        sudo systemctl status dhcpd --no-pager
-    else
-        echo -e "Error al reiniciar el servidor DHCP"
-        echo -e "Ejecute: sudo journalctl -xeu dhcpd.service"
-    fi
+   if systemctl is-active --quiet dhcpd; then
+      echo -e "Servidor DHCP reiniciado correctamente"
+      sudo systemctl status dhcpd --no-pager
+   else
+      echo -e "Error al reiniciar el servidor DHCP"
+      echo -e "Ejecute: sudo journalctl -xeu dhcpd.service"
+   fi
 }
 
 # NUEVA FUNCIÓN: Detener el servicio DHCP
 detenerDHCP(){
-    echo -e "Deteniendo servidor DHCP..."
+   echo -e "Deteniendo servidor DHCP..."
     
-    if ! systemctl is-active --quiet dhcpd; then
-        echo -e "El servicio DHCP ya está detenido"
-        return 0
-    fi
+   if ! systemctl is-active --quiet dhcpd; then
+      echo -e "El servicio DHCP ya está detenido"
+      return 0
+   fi
     
-    sudo systemctl stop dhcpd
+   sudo systemctl stop dhcpd
     
-    if ! systemctl is-active --quiet dhcpd; then
-        echo -e "Servidor DHCP detenido correctamente"
-        sudo systemctl status dhcpd --no-pager
-    else
-        echo -e "Error al detener el servidor DHCP"
-    fi
+   if ! systemctl is-active --quiet dhcpd; then
+      echo -e "Servidor DHCP detenido correctamente"
+      sudo systemctl status dhcpd --no-pager
+   else
+      echo -e "Error al detener el servidor DHCP"
+   fi
 }
 
 # NUEVA FUNCIÓN: Monitor del servidor DHCP
 monitorear(){
-    clear
-    echo "═══════════════════════════════════════════"
-    echo "MONITOR DEL SERVIDOR DHCP"
-    echo "═══════════════════════════════════════════"
-    echo ""
+   clear
+   echo "MONITOR DEL SERVIDOR DHCP"
+   echo ""
     
-    # Verificar si el servicio está activo
-    if ! systemctl is-active --quiet dhcpd; then
-        echo "El servicio DHCP NO está activo"
-        echo ""
-        read -p "Presione Enter para volver al menú..."
-        return 1
-    fi
+   # Verificar si el servicio está activo
+   if ! systemctl is-active --quiet dhcpd; then
+      echo "El servicio DHCP NO está activo"
+      echo ""
+      read -p "Presione Enter para volver al menú..."
+      return 1
+   fi
     
-    echo "Estado del servicio: ACTIVO"
-    echo ""
+   echo "Estado del servicio: ACTIVO"
+   echo ""
     
-    # Mostrar configuración actual
-    echo "--- CONFIGURACIÓN ACTUAL ---"
-    if [ -f /etc/dhcpd.conf ]; then
-        echo "Archivo de configuración: /etc/dhcpd.conf"
-        echo ""
-        cat /etc/dhcpd.conf
-        echo ""
-    else
-        echo "No se encontró archivo de configuración"
-        echo ""
-    fi
+   # Mostrar configuración actual
+   echo "--- CONFIGURACIÓN ACTUAL ---"
+   if [ -f /etc/dhcpd.conf ]; then
+      echo "Archivo de configuración: /etc/dhcpd.conf"
+      echo ""
+      cat /etc/dhcpd.conf
+      echo ""
+   else
+      echo "No se encontró archivo de configuración"
+      echo ""
+   fi
     
-    # Mostrar leases (IPs asignadas)
-    echo "--- IPs ASIGNADAS (LEASES) ---"
-    if [ -f /var/lib/dhcp/dhcpd.leases ]; then
-        echo "Archivo de leases: /var/lib/dhcp/dhcpd.leases"
-        echo ""
+   # Mostrar leases (IPs asignadas)
+   echo "--- IPs ASIGNADAS (LEASES) ---"
+   if [ -f /var/lib/dhcp/db/dhcpd.leases ]; then
+      echo "Archivo de leases: /var/lib/dhcp/db/dhcpd.leases"
+      echo ""
         
-        # Extraer información relevante de los leases
-        grep -E "^lease |  hardware ethernet |  starts |  ends |  hostname" /var/lib/dhcp/dhcpd.leases | \
-        awk '
-        /^lease/ { 
-            if (ip != "") {
-                printf "IP: %-15s | MAC: %-17s | Inicio: %-20s | Hostname: %s\n", ip, mac, inicio, hostname
-            }
-            ip = $2; mac = ""; inicio = ""; hostname = ""
-        }
-        /hardware ethernet/ { mac = $3; gsub(";", "", mac) }
-        /starts/ { inicio = $3 " " $4; gsub(";", "", inicio) }
-        /hostname/ { hostname = $2; gsub(/[";]/, "", hostname) }
-        END {
-            if (ip != "") {
-                printf "IP: %-15s | MAC: %-17s | Inicio: %-20s | Hostname: %s\n", ip, mac, inicio, hostname
-            }
-        }'
+      # Extraer información relevante de los leases
+      grep -E "^lease |  hardware ethernet |  starts |  ends |  hostname" /var/lib/dhcp/dhcpd.leases | \
+      awk '
+      /^lease/ { 
+         if (ip != "") {
+            printf "IP: %-15s | MAC: %-17s | Inicio: %-20s | Hostname: %s\n", ip, mac, inicio, hostname
+         }
+         ip = $2; mac = ""; inicio = ""; hostname = ""
+      }
+      /hardware ethernet/ { mac = $3; gsub(";", "", mac) }
+      /starts/ { inicio = $3 " " $4; gsub(";", "", inicio) }
+      /hostname/ { hostname = $2; gsub(/[";]/, "", hostname) }
+      END {
+         if (ip != "") {
+            printf "IP: %-15s | MAC: %-17s | Inicio: %-20s | Hostname: %s\n", ip, mac, inicio, hostname
+         }
+      }'
         
-        echo ""
-        echo "Total de leases activos: $(grep -c "^lease" /var/lib/dhcp/dhcpd.leases)"
-    else
-        echo "No se encontró archivo de leases"
-    fi
+      echo ""
+      echo "Total de leases activos: $(grep -c "^lease" /var/lib/dhcp/dhcpd.leases)"
+   else
+      echo "No se encontró archivo de leases"
+   fi
     
-    echo ""
-    echo "--- ESTADÍSTICAS DEL SERVICIO ---"
-    sudo systemctl status dhcpd --no-pager | head -n 15
+   echo ""
+   echo "--- ESTADÍSTICAS DEL SERVICIO ---"
+   sudo systemctl status dhcpd --no-pager | head -n 15
     
-    echo ""
-    echo "--- ÚLTIMOS LOGS ---"
-    sudo journalctl -u dhcpd -n 10 --no-pager
+   echo ""
+   echo "--- ÚLTIMOS LOGS ---"
+   sudo journalctl -u dhcpd -n 10 --no-pager
     
-    echo ""
-    read -p "Presione Enter para volver al menú..."
+   echo ""
+   read -p "Presione Enter para volver al menú..."
 }
 
 mostrarMenu() {
-    clear
-    echo "═══════════════════════════════════════════"
-    echo "   SERVIDOR DHCP - RED INTERNA"
-    echo "═══════════════════════════════════════════"
-    echo " 1. Verificar instalación"
-    echo " 2. Instalación completa (paquete + configuración)"
-    echo " 3. Solo configurar/reconfigurar DHCP"
-    echo " 4. Monitorear (IPs asignadas)"
-    echo " 5. Reiniciar servicio"
-    echo " 6. Detener servicio"
-    echo " 7. Salir"
-    echo "═══════════════════════════════════════════"
-    read -p " Seleccione una opción [1-7]: " opcion
+   clear
+   echo "SERVIDOR DHCP"
+   echo " 1. Verificar instalación"
+   echo " 2. Instalación completa (paquete + configuración)"
+   echo " 3. Solo configurar/reconfigurar DHCP"
+   echo " 4. Monitorear (IPs asignadas)"
+   echo " 5. Reiniciar servicio"
+   echo " 6. Detener servicio"
+   echo " 7. Salir"
+   echo "═══════════════════════════════════════════"
+   read -p " Seleccione una opción [1-7]: " opcion
     
-    case $opcion in
-        1) verificarInstalacion ;;
-        2) intalacionCompleta ;;
-        3) ConfiguracionDHCP ;;
-        4) monitorear ;;
-        5) reiniciarDHCP ;;
-        6) detenerDHCP ;;
-        7) exit 0 ;;
-        *) 
-            echo "Opción inválida"
-            sleep 2
-            mostrarMenu
-            ;;
-    esac
+   case $opcion in
+      1) verificarInstalacion ;;
+      2) intalacionCompleta ;;
+      3) ConfiguracionDHCP ;;
+      4) monitorear ;;
+      5) reiniciarDHCP ;;
+      6) detenerDHCP ;;
+      7) exit 0 ;;
+      *) 
+         echo "Opción inválida"
+         sleep 2
+         mostrarMenu
+         ;;
+   esac
     
-    # Volver al menú después de ejecutar una opción
-    echo ""
-    read -p "Presione Enter para continuar..."
-    mostrarMenu
+   # Volver al menú después de ejecutar una opción
+   echo ""
+   read -p "Presione Enter para continuar..."
+   mostrarMenu
 }
 
 if [[ $EUID -ne 0 ]]; then
