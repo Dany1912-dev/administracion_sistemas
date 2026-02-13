@@ -1,3 +1,5 @@
+#!/bin/bash
+
 PAQUETE="dhcp-server"
 scope=""
 ipInicial=""
@@ -9,6 +11,7 @@ dnsPrimario=""
 dnsSecundario=""
 broadcast=""
 ipServidor=""
+
 calcularMascara(){
    local ipInicial="$1"
    local ipFinal="$2"
@@ -174,10 +177,6 @@ validarip(){
          echo "ERROR: El primer octeto no puede ser 0 (0.X.X.X) para una direccion host."
          return 1
       fi
-      if  [[ $cuartoOcteto -eq 0 ]]; then
-         echo "ERROR: El ultimo octeto no puede ser 0 para una direccion host."
-         return 1
-      fi
 
       if [[ $cuartoOcteto -eq 255 ]]; then
          echo "ERROR: El ultimo octeto no puede ser 255 para una direccion de host."
@@ -314,6 +313,7 @@ ConfiguracionDHCP(){
       if [[ -z "$gateway" ]]; then
          true
       elif [[ "$gateway" == "none" ]]; then
+         gateway=""
          true
       else 
          validarip "$gateway" "gateway"
@@ -322,11 +322,13 @@ ConfiguracionDHCP(){
       echo "Intentando de nuevo"
    done
 
+   # CORRECCIÓN: Variable corregida de 'dns' a 'dnsPrimario'
    until
-      read -p "DNS (OPCIONAL, Presione enter para omitir): " dns
+      read -p "DNS (OPCIONAL, Presione enter para omitir): " dnsPrimario
       if [[ -z "$dnsPrimario" ]]; then
          true
       elif [[ "$dnsPrimario" == "none" ]]; then
+         dnsPrimario=""
          true
       else 
          validarip "$dnsPrimario" "dns"
@@ -347,6 +349,7 @@ ConfiguracionDHCP(){
             break
          else
             echo "Por favor ingrese 's' o 'n'."
+            false
          fi
       do
          echo "Intentando de nuevo"
@@ -357,16 +360,33 @@ ConfiguracionDHCP(){
 	ip -br link show | grep -v "lo" | awk '{print $1}'
 	read -p "Ingrese la interfaz de red a usar (ej: enp0s8): " interfaz
 
-    echo -e "\nLA CONFIGURACION FINAL ES:"
+   echo -e "\nLA CONFIGURACION FINAL ES:"
 	echo -e "Nombre del ambito: $scope"
 	echo -e "Mascara: $mascara"
-	echo -e "IP inicial: $ipInicial"
-	echo -e "IP final: $ipFinal"
+	echo -e "IP del servidor: $ipServidor"
+	echo -e "IP inicial (rango DHCP): $ipInicial"
+	echo -e "IP final (rango DHCP): $ipFinal"
 	echo -e "Tiempo de sesion: $tiempoSesion"
-	echo -e "Gateway: $gateway"
-	echo -e "DNS primario: $dnsPrimario"
-	echo -e "DNS alternativo: $dnsSecundario"
+	echo -e "Gateway: ${gateway:-[No configurado]}"
+	echo -e "DNS primario: ${dnsPrimario:-[No configurado]}"
+	echo -e "DNS alternativo: ${dnsSecundario:-[No configurado]}"
 	echo -e "Interfaz: $interfaz\n"
+	
+	# Advertencia si la IP del servidor está en el rango DHCP
+	_ip2num() {
+      local ip="$1"
+      IFS='.' read -r a b c d <<< "$ip"
+      echo $(( (a * 256 * 256 * 256) + (b * 256 * 256) + (c * 256) + d ))
+   }
+   
+   local servidor_num=$(_ip2num "$ipServidor")
+   local inicio_num=$(_ip2num "$ipInicial")
+   local final_num=$(_ip2num "$ipFinal")
+   
+   if [[ $servidor_num -ge $inicio_num && $servidor_num -le $final_num ]]; then
+      echo -e "ADVERTENCIA: La IP del servidor ($ipServidor) está dentro del rango DHCP."
+      echo -e "   Esto puede causar conflictos. Se recomienda usar una IP fuera del rango.\n"
+   fi
 
    read -p "Acepta esta configuracion? (s/n): " opc
    if [ "$opc" = "s" ]; then
@@ -386,7 +406,7 @@ ConfiguracionDHCP(){
 	echo -e "Red calculada: $red"
 	echo -e "Broadcast calculado: $broadcast"
 	
-	# Crear configuración DHCP
+	# CORRECCIÓN: Crear configuración DHCP con validación de campos opcionales
 	echo -e "Creando configuración DHCP..."
 	sudo bash -c "cat > /etc/dhcpd.conf" << EOF
 # Configuracion DHCP - $scope
@@ -396,11 +416,13 @@ authoritative;
 
 subnet $red netmask $mascara {
     range $ipInicial $ipFinal;
-    option routers $gateway;
+$(if [ -n "$gateway" ]; then
+    echo "    option routers $gateway;"
+fi)
     option subnet-mask $mascara;
-$(if [ "$dnsPrimario" != "" ] && [ "$dnsSecundario" != "" ]; then
+$(if [ -n "$dnsPrimario" ] && [ -n "$dnsSecundario" ]; then
     echo "    option domain-name-servers $dnsPrimario, $dnsSecundario;"
-elif [ "$dnsPrimario" != "" ]; then
+elif [ -n "$dnsPrimario" ]; then
     echo "    option domain-name-servers $dnsPrimario;"
 fi)
     option broadcast-address $broadcast;
@@ -408,35 +430,128 @@ fi)
 EOF
 
 		# Configurar interfaz
-		interfaz="enp0s8"
 		echo -e "Configurando interfaz de red..."
 		sudo bash -c "echo 'DHCPD_INTERFACE=\"$interfaz\"' > /etc/sysconfig/dhcpd"
 		
 		echo -e "Configurando IP estática $ipServidor en la interfaz $interfaz..."
-		sudo ip addr flush dev $interfaz
-		sudo ip addr add $ipServidor/$( calcularBits "$mascara" ) dev $interfaz
-		sudo ip link set $interfaz up
-
-sudo bash -c "cat > /etc/sysconfig/network/ifcfg-$interfaz" << EOF
+		echo ""
+		
+		# Detectar qué gestor de red está activo
+		if systemctl is-active --quiet NetworkManager; then
+			echo -e "Usando NetworkManager (nmcli)..."
+			echo ""
+			
+			# Mostrar configuración actual
+			echo -e "Configuración actual:"
+			nmcli device show $interfaz 2>/dev/null | grep -E "IP4.ADDRESS|GENERAL.STATE" || echo "  Sin configuración"
+			echo ""
+			
+			# Verificar si existe una conexión para esta interfaz
+			conexion_existente=$(nmcli -t -f NAME,DEVICE connection show 2>/dev/null | grep ":$interfaz$" | cut -d: -f1 | head -1)
+			
+			if [ -n "$conexion_existente" ]; then
+				echo -e "Modificando conexión existente: $conexion_existente"
+				
+				# Modificar la conexión existente
+				sudo nmcli connection modify "$conexion_existente" \
+					ipv4.method manual \
+					ipv4.addresses "$ipServidor/$( calcularBits "$mascara" )"
+				
+				# Aplicar cambios
+				echo -e "Aplicando cambios..."
+				sudo nmcli connection up "$conexion_existente"
+			else
+				echo -e "Creando nueva conexión para $interfaz"
+				
+				# Crear nueva conexión
+				sudo nmcli connection add \
+					type ethernet \
+					con-name "dhcp-server-$interfaz" \
+					ifname $interfaz \
+					ipv4.method manual \
+					ipv4.addresses "$ipServidor/$( calcularBits "$mascara" )"
+				
+				# Activar la conexión
+				sudo nmcli connection up "dhcp-server-$interfaz"
+			fi
+			
+			# Verificación
+			echo -e "\nConfiguración aplicada:"
+			nmcli device show $interfaz | grep -E "IP4.ADDRESS|GENERAL.STATE"
+			
+		else
+			echo -e "Usando configuración manual con comandos ip..."
+			echo ""
+			
+			# Mostrar configuración actual
+			echo -e "Configuración actual:"
+			ip addr show $interfaz | grep "inet " | awk '{print "  " $0}' || echo "  Sin IP configurada"
+			echo ""
+			
+			# Obtener la IP actual si existe
+			ip_actual=$(ip addr show $interfaz | grep "inet " | head -1 | awk '{print $2}')
+			
+			if [ -n "$ip_actual" ]; then
+				echo -e "Eliminando IP actual: $ip_actual"
+				sudo ip addr del $ip_actual dev $interfaz 2>/dev/null
+			fi
+			
+			# Asignar la nueva IP
+			echo -e "Asignando nueva IP: $ipServidor/$( calcularBits "$mascara" )"
+			sudo ip addr add $ipServidor/$( calcularBits "$mascara" ) dev $interfaz
+			
+			# Asegurar que la interfaz esté UP
+			sudo ip link set $interfaz up
+			
+			# Crear configuración persistente
+			echo -e "Creando configuración persistente..."
+			sudo bash -c "cat > /etc/sysconfig/network/ifcfg-$interfaz" << EOF
 BOOTPROTO='static'
 STARTMODE='auto'
 IPADDR='$ipServidor'
 NETMASK='$mascara'
+NAME='$interfaz'
 EOF
+			
+			# Verificación
+			echo -e "\nConfiguración final:"
+			ip addr show $interfaz | grep "inet " | awk '{print "  " $0}'
+		fi
+		
+		echo ""
+		echo "Configuración de red completada."
+		echo ""
+		echo ""
 
 		# Reiniciar servicio
 		echo -e "Reiniciando servicio DHCP..."
 		sudo systemctl restart dhcpd
 		
 		echo -e "IP estática $ipServidor configurada en $interfaz"
+		echo ""
 
 		# Verificar estado
 		if sudo systemctl is-active --quiet dhcpd; then
-			echo -e "¡Servidor DHCP configurado y funcionando correctamente!"
+			echo -e "¡Servidor DHCP configurado exitosamente!"
+			echo ""
+			echo -e "Resumen de configuración:"
+			echo -e " Red: $red/$( calcularBits "$mascara" )"
+			echo -e " Rango DHCP: $ipInicial - $ipFinal"
+			echo -e " IP del servidor: $ipServidor"
+			echo -e " Interfaz: $interfaz"
+			echo -e " Gateway: ${gateway:-[No configurado]}"
+			echo -e " DNS: ${dnsPrimario:-[No configurado]}"
+			echo ""
 			sudo systemctl status dhcpd --no-pager
 		else
 			echo -e "Error al iniciar el servicio DHCP"
-			echo -e "Ejecute: sudo journalctl -xeu dhcpd.service"
+			echo ""
+			echo -e "Ejecute el siguiente comando para ver detalles del error:"
+			echo -e "  sudo journalctl -xeu dhcpd.service"
+			echo ""
+			echo -e "Verificando configuración generada:"
+			echo -e "-----------------------------------"
+			cat /etc/dhcpd.conf
 	   fi
    else
       echo -e "Volviendo a configurar..."
@@ -481,56 +596,151 @@ verificarInstalacion(){
 }
 
 reiniciarDHCP(){
-    echo -e "Reiniciando servidor DHCP..."
+   echo -e "Reiniciando servidor DHCP..."
     
-    if ! systemctl is-active --quiet dhcpd; then
-        echo -e "El servicio DHCP no está activo"
-        read -p "¿Desea iniciarlo en lugar de reiniciarlo? (y/n): " opc
-        if [[ "$opc" = "y" ]]; then
-            sudo systemctl start dhcpd
-        else
-            return 1
-        fi
-    else
-        sudo systemctl restart dhcpd
-    fi
+   if ! systemctl is-active --quiet dhcpd; then
+      echo -e "El servicio DHCP no está activo"
+      read -p "¿Desea iniciarlo en lugar de reiniciarlo? (y/n): " opc
+      if [[ "$opc" = "y" ]]; then
+         sudo systemctl start dhcpd
+      else
+         return 1
+      fi
+   else
+      sudo systemctl restart dhcpd
+   fi
     
-    if systemctl is-active --quiet dhcpd; then
-        echo -e "Servidor DHCP reiniciado correctamente"
-        sudo systemctl status dhcpd --no-pager
-    else
-        echo -e "Error al reiniciar el servidor DHCP"
-        echo -e "Ejecute: sudo journalctl -xeu dhcpd.service"
-    fi
+   if systemctl is-active --quiet dhcpd; then
+      echo -e "Servidor DHCP reiniciado correctamente"
+      sudo systemctl status dhcpd --no-pager
+   else
+      echo -e "Error al reiniciar el servidor DHCP"
+      echo -e "Ejecute: sudo journalctl -xeu dhcpd.service"
+   fi
+}
+
+# NUEVA FUNCIÓN: Detener el servicio DHCP
+detenerDHCP(){
+   echo -e "Deteniendo servidor DHCP..."
+    
+   if ! systemctl is-active --quiet dhcpd; then
+      echo -e "El servicio DHCP ya está detenido"
+      return 0
+   fi
+    
+   sudo systemctl stop dhcpd
+    
+   if ! systemctl is-active --quiet dhcpd; then
+      echo -e "Servidor DHCP detenido correctamente"
+      sudo systemctl status dhcpd --no-pager
+   else
+      echo -e "Error al detener el servidor DHCP"
+   fi
+}
+
+# NUEVA FUNCIÓN: Monitor del servidor DHCP
+monitorear(){
+   clear
+   echo "MONITOR DEL SERVIDOR DHCP"
+   echo ""
+    
+   # Verificar si el servicio está activo
+   if ! systemctl is-active --quiet dhcpd; then
+      echo "El servicio DHCP NO está activo"
+      echo ""
+      read -p "Presione Enter para volver al menú..."
+      return 1
+   fi
+    
+   echo "Estado del servicio: ACTIVO"
+   echo ""
+    
+   # Mostrar configuración actual
+   echo "--- CONFIGURACIÓN ACTUAL ---"
+   if [ -f /etc/dhcpd.conf ]; then
+      echo "Archivo de configuración: /etc/dhcpd.conf"
+      echo ""
+      cat /etc/dhcpd.conf
+      echo ""
+   else
+      echo "No se encontró archivo de configuración"
+      echo ""
+   fi
+    
+   # Mostrar leases (IPs asignadas)
+   echo "--- IPs ASIGNADAS (LEASES) ---"
+   if [ -f /var/lib/dhcp/db/dhcpd.leases ]; then
+      echo "Archivo de leases: /var/lib/dhcp/db/dhcpd.leases"
+      echo ""
+        
+      # Extraer información relevante de los leases
+      grep -E "^lease |  hardware ethernet |  starts |  ends |  hostname" /var/lib/dhcp/db/dhcpd.leases | \
+      awk '
+      /^lease/ { 
+         if (ip != "") {
+            printf "IP: %-15s | MAC: %-17s | Inicio: %-20s | Hostname: %s\n", ip, mac, inicio, hostname
+         }
+         ip = $2; mac = ""; inicio = ""; hostname = ""
+      }
+      /hardware ethernet/ { mac = $3; gsub(";", "", mac) }
+      /starts/ { inicio = $3 " " $4; gsub(";", "", inicio) }
+      /hostname/ { hostname = $2; gsub(/[";]/, "", hostname) }
+      END {
+         if (ip != "") {
+            printf "IP: %-15s | MAC: %-17s | Inicio: %-20s | Hostname: %s\n", ip, mac, inicio, hostname
+         }
+      }'
+        
+      echo ""
+      echo "Total de leases activos: $(grep -c "^lease" /var/lib/dhcp/db/dhcpd.leases)"
+   else
+      echo "No se encontró archivo de leases"
+   fi
+    
+   echo ""
+   echo "--- ESTADÍSTICAS DEL SERVICIO ---"
+   sudo systemctl status dhcpd --no-pager | head -n 15
+    
+   echo ""
+   echo "--- ÚLTIMOS LOGS ---"
+   sudo journalctl -u dhcpd -n 10 --no-pager
+    
+   echo ""
+   read -p "Presione Enter para volver al menú..."
 }
 
 mostrarMenu() {
-    clear
-    echo "═══════════════════════════════════════════"
-    echo "   SERVIDOR DHCP - RED INTERNA"
-    echo "═══════════════════════════════════════════"
-    echo " 1. Verificar instalación"
-    echo " 2. Instalación completa (paquete + configuración)"
-    echo " 3. Solo configurar/reconfigurar DHCP"
-    echo " 4. Monitorear (IPs asignadas)"
-    echo " 5. Reiniciar servicio"
-    echo " 6. Salir"
-    echo "═══════════════════════════════════════════"
-    read -p " Seleccione una opción [1-6]: " opcion
+   clear
+   echo "SERVIDOR DHCP"
+   echo " 1. Verificar instalación"
+   echo " 2. Instalación completa (paquete + configuración)"
+   echo " 3. Solo configurar/reconfigurar DHCP"
+   echo " 4. Monitorear (IPs asignadas)"
+   echo " 5. Reiniciar servicio"
+   echo " 6. Detener servicio"
+   echo " 7. Salir"
+   echo "═══════════════════════════════════════════"
+   read -p " Seleccione una opción [1-7]: " opcion
     
-    case $opcion in
-        1) verificarInstalacion ;;
-        2) intalacionCompleta ;;
-        3) ConfiguracionDHCP ;;
-        4) monitorear ;;
-        5) reiniciarDHCP ;;
-        6) exit 0 ;;
-        *) 
-            echo "Opción inválida"
-            sleep 2
-            mostrar_menu
-            ;;
-    esac
+   case $opcion in
+      1) verificarInstalacion ;;
+      2) intalacionCompleta ;;
+      3) ConfiguracionDHCP ;;
+      4) monitorear ;;
+      5) reiniciarDHCP ;;
+      6) detenerDHCP ;;
+      7) exit 0 ;;
+      *) 
+         echo "Opción inválida"
+         sleep 2
+         mostrarMenu
+         ;;
+   esac
+    
+   # Volver al menú después de ejecutar una opción
+   echo ""
+   read -p "Presione Enter para continuar..."
+   mostrarMenu
 }
 
 if [[ $EUID -ne 0 ]]; then
