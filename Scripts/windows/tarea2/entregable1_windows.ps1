@@ -204,8 +204,8 @@ function Menu-Iniciar {
     Write-Host "=== INICIAR SERVIDOR DHCP ==="
 
     # Configurar IP estatica
-    $iface = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -notmatch 'Loopback' } | Select-Object -First 1
-    if (-not $iface) { Write-Host "ERROR: No se encontro interfaz activa."; Pausa; return }
+    $iface = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.Name -eq 'Ethernet 2' }
+    if (-not $iface) { Write-Host "ERROR: No se encontro la interfaz 'Ethernet 2'."; Pausa; return }
 
     Write-Host "Asignando IP estatica $IPINICIAL en '$($iface.Name)'..."
     Remove-NetIPAddress -InterfaceAlias $iface.Name -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue
