@@ -364,16 +364,33 @@ ConfiguracionDHCP(){
 	ip -br link show | grep -v "lo" | awk '{print $1}'
 	read -p "Ingrese la interfaz de red a usar (ej: enp0s8): " interfaz
 
-    echo -e "\nLA CONFIGURACION FINAL ES:"
+   echo -e "\nLA CONFIGURACION FINAL ES:"
 	echo -e "Nombre del ambito: $scope"
 	echo -e "Mascara: $mascara"
-	echo -e "IP inicial: $ipInicial"
-	echo -e "IP final: $ipFinal"
+	echo -e "IP del servidor: $ipServidor"
+	echo -e "IP inicial (rango DHCP): $ipInicial"
+	echo -e "IP final (rango DHCP): $ipFinal"
 	echo -e "Tiempo de sesion: $tiempoSesion"
 	echo -e "Gateway: ${gateway:-[No configurado]}"
 	echo -e "DNS primario: ${dnsPrimario:-[No configurado]}"
 	echo -e "DNS alternativo: ${dnsSecundario:-[No configurado]}"
 	echo -e "Interfaz: $interfaz\n"
+	
+	# Advertencia si la IP del servidor está en el rango DHCP
+	_ip2num() {
+      local ip="$1"
+      IFS='.' read -r a b c d <<< "$ip"
+      echo $(( (a * 256 * 256 * 256) + (b * 256 * 256) + (c * 256) + d ))
+   }
+   
+   local servidor_num=$(_ip2num "$ipServidor")
+   local inicio_num=$(_ip2num "$ipInicial")
+   local final_num=$(_ip2num "$ipFinal")
+   
+   if [[ $servidor_num -ge $inicio_num && $servidor_num -le $final_num ]]; then
+      echo -e "ADVERTENCIA: La IP del servidor ($ipServidor) está dentro del rango DHCP."
+      echo -e "   Esto puede causar conflictos. Se recomienda usar una IP fuera del rango.\n"
+   fi
 
    read -p "Acepta esta configuracion? (s/n): " opc
    if [ "$opc" = "s" ]; then
@@ -420,31 +437,83 @@ EOF
 		echo -e "Configurando interfaz de red..."
 		sudo bash -c "echo 'DHCPD_INTERFACE=\"$interfaz\"' > /etc/sysconfig/dhcpd"
 		
-		echo -e "Configurando IP estática $ipServidor en la interfaz $interfaz..."
-		sudo ip addr flush dev $interfaz
-		sudo ip addr add $ipServidor/$( calcularBits "$mascara" ) dev $interfaz
+		echo -e "Limpiando y configurando IP estática $ipServidor en la interfaz $interfaz..."
+		
+		# 1. Detener la interfaz
+		echo -e "  [1/5] Deteniendo interfaz $interfaz..."
+		sudo ip link set $interfaz down 2>/dev/null
+		
+		# 2. Eliminar TODAS las IPs existentes
+		echo -e "  [2/5] Eliminando configuraciones anteriores..."
+		sudo ip addr flush dev $interfaz 2>/dev/null
+		
+		# 3. Levantar la interfaz
+		echo -e "  [3/5] Levantando interfaz..."
 		sudo ip link set $interfaz up
+		
+		# 4. Esperar un momento para que la interfaz esté lista
+		sleep 1
+		
+		# 5. Asignar la nueva IP estática
+		echo -e "  [4/5] Asignando IP estática $ipServidor/$( calcularBits "$mascara" )..."
+		sudo ip addr add $ipServidor/$( calcularBits "$mascara" ) dev $interfaz
+		
+		# Verificar que la IP se asignó correctamente
+		if ip addr show $interfaz | grep -q "$ipServidor"; then
+			echo -e "IP estática asignada correctamente"
+		else
+			echo -e "Error al asignar IP estática"
+			echo -e "Estado actual de $interfaz:"
+			ip addr show $interfaz
+			read -p "Presione Enter para continuar de todas formas..."
+		fi
 
+		# 6. Crear archivo de configuración persistente
+		echo -e "  [5/5] Creando configuración persistente..."
 sudo bash -c "cat > /etc/sysconfig/network/ifcfg-$interfaz" << EOF
 BOOTPROTO='static'
 STARTMODE='auto'
 IPADDR='$ipServidor'
 NETMASK='$mascara'
+NAME='$interfaz'
 EOF
+
+		echo -e "Configuración de red completada."
+		echo ""
 
 		# Reiniciar servicio
 		echo -e "Reiniciando servicio DHCP..."
 		sudo systemctl restart dhcpd
 		
 		echo -e "IP estática $ipServidor configurada en $interfaz"
+		echo ""
 
 		# Verificar estado
 		if sudo systemctl is-active --quiet dhcpd; then
-			echo -e "¡Servidor DHCP configurado y funcionando correctamente!"
+			echo -e "═══════════════════════════════════════════"
+			echo -e "¡Servidor DHCP configurado exitosamente!"
+			echo -e "═══════════════════════════════════════════"
+			echo ""
+			echo -e "Resumen de configuración:"
+			echo -e "  • Red: $red/$( calcularBits "$mascara" )"
+			echo -e "  • Rango DHCP: $ipInicial - $ipFinal"
+			echo -e "  • IP del servidor: $ipServidor"
+			echo -e "  • Interfaz: $interfaz"
+			echo -e "  • Gateway: ${gateway:-[No configurado]}"
+			echo -e "  • DNS: ${dnsPrimario:-[No configurado]}"
+			echo ""
 			sudo systemctl status dhcpd --no-pager
 		else
-			echo -e "Error al iniciar el servicio DHCP"
-			echo -e "Ejecute: sudo journalctl -xeu dhcpd.service"
+			echo -e "═══════════════════════════════════════════"
+			echo -e "  ✗ Error al iniciar el servicio DHCP"
+			echo -e "═══════════════════════════════════════════"
+			echo ""
+			echo -e "Ejecute el siguiente comando para ver detalles del error:"
+			echo -e "  sudo journalctl -xeu dhcpd.service"
+			echo ""
+			echo -e "Verificando configuración generada:"
+			echo -e "-----------------------------------"
+			cat /etc/dhcpd.conf
 	   fi
    else
       echo -e "Volviendo a configurar..."
@@ -524,10 +593,10 @@ detenerDHCP(){
     sudo systemctl stop dhcpd
     
     if ! systemctl is-active --quiet dhcpd; then
-        echo -e "✓ Servidor DHCP detenido correctamente"
+        echo -e "Servidor DHCP detenido correctamente"
         sudo systemctl status dhcpd --no-pager
     else
-        echo -e "✗ Error al detener el servidor DHCP"
+        echo -e "Error al detener el servidor DHCP"
     fi
 }
 
@@ -541,7 +610,7 @@ monitorear(){
     
     # Verificar si el servicio está activo
     if ! systemctl is-active --quiet dhcpd; then
-        echo "⚠ El servicio DHCP NO está activo"
+        echo "El servicio DHCP NO está activo"
         echo ""
         read -p "Presione Enter para volver al menú..."
         return 1
@@ -558,7 +627,7 @@ monitorear(){
         cat /etc/dhcpd.conf
         echo ""
     else
-        echo "⚠ No se encontró archivo de configuración"
+        echo "No se encontró archivo de configuración"
         echo ""
     fi
     
@@ -589,7 +658,7 @@ monitorear(){
         echo ""
         echo "Total de leases activos: $(grep -c "^lease" /var/lib/dhcp/dhcpd.leases)"
     else
-        echo "⚠ No se encontró archivo de leases"
+        echo "No se encontró archivo de leases"
     fi
     
     echo ""
