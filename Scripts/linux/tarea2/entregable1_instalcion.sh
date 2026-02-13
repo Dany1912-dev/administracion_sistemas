@@ -368,8 +368,8 @@ ConfiguracionDHCP(){
 	echo -e "DNS alternativo: $dnsSecundario"
 	echo -e "Interfaz: $interfaz\n"
 
-   read -p "Acepta esta configuracion? (y/n): " opc
-   if [ "$opc" = "y" ]; then
+   read -p "Acepta esta configuracion? (s/n): " opc
+   if [ "$opc" = "s" ]; then
    echo ""
    echo "APLICANDO CONFIGURACION"
    echo ""
@@ -383,11 +383,11 @@ ConfiguracionDHCP(){
 	# Calcular broadcast
 	broadcast="$((a | (255 - ma))).$((b | (255 - mb))).$((c | (255 - mc))).$((d | (255 - md)))"
 	
-	echo -e "${amarillo}Red calculada: $red${nc}"
-	echo -e "${amarillo}Broadcast calculado: $broadcast${nc}"
+	echo -e "Red calculada: $red"
+	echo -e "Broadcast calculado: $broadcast"
 	
 	# Crear configuración DHCP
-	echo -e "${amarillo}Creando configuración DHCP...${nc}"
+	echo -e "Creando configuración DHCP..."
 	sudo bash -c "cat > /etc/dhcpd.conf" << EOF
 # Configuracion DHCP - $scope
 default-lease-time $tiempoSesion;
@@ -533,9 +533,9 @@ mostrarMenu() {
     esac
 }
 
-#if [[ $EUID -ne 0 ]]; then
-#   echo "Ejecutar como root: sudo $0"
-#   exit 1
-#fi
+if [[ $EUID -ne 0 ]]; then
+   echo "Ejecutar como root: sudo $0"
+   exit 1
+fi
 
 mostrarMenu
