@@ -177,10 +177,6 @@ validarip(){
          echo "ERROR: El primer octeto no puede ser 0 (0.X.X.X) para una direccion host."
          return 1
       fi
-      if  [[ $cuartoOcteto -eq 0 ]]; then
-         echo "ERROR: El ultimo octeto no puede ser 0 para una direccion host."
-         return 1
-      fi
 
       if [[ $cuartoOcteto -eq 255 ]]; then
          echo "ERROR: El ultimo octeto no puede ser 255 para una direccion de host."
@@ -678,7 +674,7 @@ monitorear(){
       echo ""
         
       # Extraer información relevante de los leases
-      grep -E "^lease |  hardware ethernet |  starts |  ends |  hostname" /var/lib/dhcp/dhcpd.leases | \
+      grep -E "^lease |  hardware ethernet |  starts |  ends |  hostname" /var/lib/dhcp/db/dhcpd.leases | \
       awk '
       /^lease/ { 
          if (ip != "") {
@@ -696,7 +692,7 @@ monitorear(){
       }'
         
       echo ""
-      echo "Total de leases activos: $(grep -c "^lease" /var/lib/dhcp/dhcpd.leases)"
+      echo "Total de leases activos: $(grep -c "^lease" /var/lib/dhcp/db/dhcpd.leases)"
    else
       echo "No se encontró archivo de leases"
    fi
