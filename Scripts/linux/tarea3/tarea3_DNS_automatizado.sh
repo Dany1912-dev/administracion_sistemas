@@ -1,13 +1,5 @@
 #!/bin/bash
 
-# ----------Colores para que sea mas intuitivo ----------
-rojo='\033[0;31m'
-amarillo='\033[1;33m'
-verde='\033[0;32m'
-azul='\033[1;34m'
-cyan='\033[0;36m'
-nc='\033[0m'
-
 # Variables globales
 domain=""
 ip=""
@@ -29,23 +21,23 @@ EVIDENCE_FILE="/tmp/dns-test-evidence-$(date +%Y%m%d-%H%M%S).log"
 ayuda() {
     echo "Uso del script: $0"
     echo "Opciones:"
-    echo -e "  ${azul}-v, --verify       ${nc}Verifica si esta instalado BIND9"
-    echo -e "  ${azul}-i, --install      ${nc}Instala y configura BIND9"
-    echo -e "  ${azul}-m, --monitor      ${nc}Monitorear servidor DNS"
-    echo -e "  ${azul}-r, --restart      ${nc}Reiniciar servidor DNS"
-    echo -e "  ${azul}-?, --help         ${nc}Muestra esta ayuda"
+    echo -e "  -v, --verify       Verifica si esta instalado BIND9"
+    echo -e "  -i, --install      Instala y configura BIND9"
+    echo -e "  -m, --monitor      Monitorear servidor DNS"
+    echo -e "  -r, --restart      Reiniciar servidor DNS"
+    echo -e "  -?, --help         Muestra esta ayuda"
 }
 
 print_warning(){
-    echo -e "${rojo}$1${nc}"
+    echo -e "$1"
 }
 
 print_success(){
-    echo -e "${verde}$1${nc}"
+    echo -e "$1"
 }
 
 print_info(){
-    echo -e "${amarillo}$1${nc}"
+    echo -e "$1"
 }
 
 validate_domain() {
@@ -135,17 +127,17 @@ verificar_Instalacion() {
 # ---------- Configurar IP estática ----------
 
 configurar_ip_estatica() {
-    print_info "═══════════════════════════════════════"
+    echo ""
     print_info "  Verificación de IP Estática"
-    print_info "═══════════════════════════════════════"
+    echo ""
     
     # 1. Detectar interfaz activa
-    local interfaz=$(ip route | grep default | awk '{print $5}' | head -1)
+    local interfaz="enp0s8"
     
     # Validar que se detectó una interfaz
     if [[ -z "$interfaz" ]]; then
         print_warning "No se pudo detectar una interfaz de red activa"
-        echo -ne "${azul}Ingrese el nombre de la interfaz (ej: eth0, ens33): ${nc}"
+        echo -ne "Ingrese el nombre de la interfaz (ej: eth0, ens33): "
         read -r interfaz
         
         # Verificar que la interfaz existe
@@ -171,28 +163,28 @@ configurar_ip_estatica() {
         
         if [[ -z "$IP_ACTUAL" ]]; then
             print_warning "No se pudo detectar IP actual"
-            echo -ne "${azul}Ingrese la IP fija deseada: ${nc}"
+            echo -ne "Ingrese la IP fija deseada: "
             read -r server_ip
             validar_IP "$server_ip" || return 1
             
-            echo -ne "${azul}Ingrese el Gateway: ${nc}"
+            echo -ne "Ingrese el Gateway: "
             read -r GATEWAY
             validar_IP "$GATEWAY" || return 1
         else
             print_info "IP actual: $IP_ACTUAL (DHCP)"
             print_info "Gateway: $GATEWAY"
             
-            echo -ne "${amarillo}¿Usar estos valores como IP fija? [S/n]: ${nc}"
+            echo -ne "¿Usar estos valores como IP fija? [S/n]: "
             read -r respuesta
             
             if [[ -z "$respuesta" ]] || [[ "$respuesta" =~ ^[Ss]$ ]]; then
                 server_ip=$IP_ACTUAL
             else
-                echo -ne "${azul}Ingrese la IP fija deseada: ${nc}"
+                echo -ne "Ingrese la IP fija deseada: "
                 read -r server_ip
                 validar_IP "$server_ip" || return 1
                 
-                echo -ne "${azul}Ingrese el Gateway: ${nc}"
+                echo -ne "Ingrese el Gateway: "
                 read -r GATEWAY
                 validar_IP "$GATEWAY" || return 1
             fi
@@ -255,7 +247,7 @@ EOF
         print_info "IP actual: $IP_ACTUAL"
         print_info "Gateway: $GATEWAY"
         
-        echo -ne "${amarillo}¿Desea configurar IP estática? [S/n]: ${nc}"
+        echo -ne "¿Desea configurar IP estática? [S/n]: "
         read -r respuesta
         
         if [[ "$respuesta" =~ ^[Nn]$ ]]; then
@@ -266,18 +258,18 @@ EOF
             return 0
         fi
         
-        echo -ne "${amarillo}¿Usar estos valores como IP fija? [S/n]: ${nc}"
+        echo -ne "¿Usar estos valores como IP fija? [S/n]: "
         read -r respuesta
         
         if [[ -z "$respuesta" ]] || [[ "$respuesta" =~ ^[Ss]$ ]]; then
             server_ip=$IP_ACTUAL
             GW=$GATEWAY
         else
-            echo -ne "${azul}Ingrese la IP fija deseada: ${nc}"
+            echo -ne "Ingrese la IP fija deseada: "
             read -r server_ip
             validar_IP "$server_ip" || return 1
             
-            echo -ne "${azul}Ingrese el Gateway: ${nc}"
+            echo -ne "Ingrese el Gateway: "
             read -r GW
             validar_IP "$GW" || return 1
             GATEWAY=$GW
@@ -328,7 +320,7 @@ install_bind9() {
     
     if verificar_Instalacion; then
         print_info "BIND9 ya está instalado"
-        echo -ne "${amarillo}¿Desea reconfigurar el servidor DNS? [s/N]: ${nc}"
+        echo -ne "¿Desea reconfigurar el servidor DNS? [s/N]: "
         read -r reconf
         if [[ ! "$reconf" =~ ^[Ss]$ ]]; then
             print_info "Operación cancelada"
@@ -507,7 +499,7 @@ agregar_dominio() {
     print_info "═══ Agregar Dominio ═══"
 
     # Pedir nombre del dominio
-    echo -ne "${azul}Ingrese el nombre del dominio (ej: reprobados.com): ${nc}"
+    echo -ne "Ingrese el nombre del dominio (ej: reprobados.com): "
     read -r nuevo_dominio
 
     # Validar dominio
@@ -524,9 +516,9 @@ agregar_dominio() {
 
     # Sugerir IP del servidor si está configurada
     if [[ -n "$server_ip" ]]; then
-        echo -ne "${azul}Ingrese la IP para $nuevo_dominio [$server_ip]: ${nc}"
+        echo -ne "Ingrese la IP para $nuevo_dominio [$server_ip]: "
     else
-        echo -ne "${azul}Ingrese la IP para $nuevo_dominio: ${nc}"
+        echo -ne "Ingrese la IP para $nuevo_dominio: "
     fi
     read -r nueva_ip
 
@@ -624,7 +616,7 @@ eliminar_dominio() {
     echo ""
 
     # Pedir dominio a eliminar
-    echo -ne "${azul}Ingrese el dominio a eliminar: ${nc}"
+    echo -ne "Ingrese el dominio a eliminar: "
     read -r dominio_eliminar
 
     # Verificar que el dominio existe
@@ -635,7 +627,7 @@ eliminar_dominio() {
 
     # Pedir confirmación
     echo ""
-    echo -ne "${rojo}¿Está seguro de eliminar el dominio $dominio_eliminar? [s/N]: ${nc}"
+    echo -ne "¿Está seguro de eliminar el dominio $dominio_eliminar? [s/N]: "
     read -r confirmacion
 
     if [[ ! "$confirmacion" =~ ^[Ss]$ ]]; then
@@ -699,19 +691,19 @@ listar_dominios() {
 
     # Encabezado de tabla
     echo ""
-    printf "${azul}%-30s %-20s %-15s${nc}\n" "DOMINIO" "IP CONFIGURADA" "ESTADO"
+    printf "%-30s %-20s %-15s\n" "DOMINIO" "IP CONFIGURADA" "ESTADO"
     echo "──────────────────────────────────────────────────────────────"
 
     # Mostrar cada dominio
     for dominio in "${dominios[@]}"; do
         local zone_file="$zones_dir/${dominio}.zone"
         local ip="N/A"
-        local estado="${rojo}Sin archivo${nc}"
+        local estado="Sin archivo"
 
         if [[ -f "$zone_file" ]]; then
             ip=$(grep "^@[[:space:]]*IN[[:space:]]*A" "$zone_file" 2>/dev/null | awk '{print $NF}')
             [[ -z "$ip" ]] && ip="N/A"
-            estado="${verde}Activo${nc}"
+            estado="Activo"
         fi
 
         printf "%-30s %-20s " "$dominio" "$ip"
@@ -725,16 +717,13 @@ listar_dominios() {
 monitoreo() {
     while true; do
         echo ""
-        echo -e "${cyan}"
-        echo "╔════════════════════════════════════════════════════════════╗"
-        echo "║              Menú de Monitoreo DNS                        ║"
-        echo "╚════════════════════════════════════════════════════════════╝"
-        echo -e "${nc}"
+        echo "Menú de Monitoreo DNS"
+        echo ""
 
-        echo -e "  ${verde}1)${nc} Agregar dominio"
-        echo -e "  ${rojo}2)${nc} Eliminar dominio"
-        echo -e "  ${azul}3)${nc} Listar dominios"
-        echo -e "  ${amarillo}0)${nc} Salir"
+        echo -e "  1) Agregar dominio"
+        echo -e "  2) Eliminar dominio"
+        echo -e "  3) Listar dominios"
+        echo -e "  0) Salir"
         echo ""
         echo -ne "Opcion: "
         read -r opcion
