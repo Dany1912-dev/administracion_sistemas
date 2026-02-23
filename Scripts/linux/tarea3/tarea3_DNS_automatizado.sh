@@ -27,22 +27,22 @@ verificar_Instalacion() {
 
     if rpm -q bind &>/dev/null; then
         local version=$(rpm -q bind --queryformat '%{VERSION}')
-        print_success "BIND9 ya está instalado (versión: $version)"
+        print_completado "BIND9 ya está instalado (versión: $version)"
         return 0
     fi
 
     if command -v named &>/dev/null; then
         local version=$(named -v 2>&1 | head -1)
-        print_success "BIND9 encontrado: $version"
+        print_completado "BIND9 encontrado: $version"
         return 0
     fi
 
     if systemctl list-unit-files 2>/dev/null | grep -q "^named.service"; then
-        print_success "Servicio named encontrado en systemd"
+        print_completado "Servicio named encontrado en systemd"
         return 0
     fi
 
-    print_warning "BIND9 no está instalado"
+    print_error "BIND9 no está instalado"
     return 1
 }
 
@@ -54,28 +54,28 @@ configurar_ip_estatica() {
     local interfaz="enp0s8"
 
     if [[ -z "$interfaz" ]]; then
-        print_warning "No se pudo detectar una interfaz de red activa"
+        print_error "No se pudo detectar una interfaz de red activa"
         echo -ne "${azul}Ingrese el nombre de la interfaz (ej: eth0, ens33): ${nc}"
         read -r interfaz
 
         if ! ip link show "$interfaz" &>/dev/null; then
-            print_warning "La interfaz $interfaz no existe"
+            print_error "La interfaz $interfaz no existe"
             return 1
         fi
     fi
 
-    print_success "Interfaz detectada: $interfaz"
+    print_completado "Interfaz detectada: $interfaz"
     local ifcfg="/etc/sysconfig/network/ifcfg-$interfaz"
 
     if [[ ! -f "$ifcfg" ]]; then
-        print_warning "No existe archivo de configuración: $ifcfg"
+        print_error "No existe archivo de configuración: $ifcfg"
         print_info "Se creará una nueva configuración"
 
         local IP_ACTUAL=$(ip addr show "$interfaz" | grep "inet " | awk '{print $2}' | cut -d/ -f1)
         local GATEWAY=$(ip route | grep default | awk '{print $3}')
 
         if [[ -z "$IP_ACTUAL" ]]; then
-            print_warning "No se pudo detectar IP actual"
+            print_error "No se pudo detectar IP actual"
             print_info "Ingrese la IP fija deseada: "
             read -r server_ip
             validar_IP "$server_ip" || return 1
