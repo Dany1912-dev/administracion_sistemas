@@ -1,8 +1,8 @@
 # Tarea 2 - Automatizacion y gestion del servidor DNS (BIND9)
 # ---------- Cargar libreria compartida ----------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/utils.sh"
-source "$SCRIPT_DIR/lib/validaciones.sh"
+source "$SCRIPT_DIR/../lib/utils.sh"
+source "$SCRIPT_DIR/../lib/validaciones.sh"
 
 # ---------- Variables globales ----------
 server_ip=""
