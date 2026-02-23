@@ -382,6 +382,7 @@ reiniciar_DNS() {
 
 agregar_dominio() {
     print_info "═══ Agregar Dominio ═══"
+    server_ip=$(ip addr show enp0s8 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
 
     echo -ne "${azul}Ingrese el nombre del dominio (ej: reprobados.com): ${nc}"
     read -r nuevo_dominio
