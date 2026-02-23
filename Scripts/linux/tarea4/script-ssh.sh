@@ -138,7 +138,7 @@ instalar_SSH() {
     fi
 
     # 6. Resumen
-    local ip=$(hostname -I | awk '{print $1}')
+    local ip=$(ip addr show enp0s8 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
     echo ""
     print_completado "══════════════════════════════════════"
     print_completado "  SSH listo para conexiones remotas"
