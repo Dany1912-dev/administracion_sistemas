@@ -4,6 +4,7 @@ source "$SCRIPT_DIR/../lib/validaciones.sh"
 
 # Variables Globales
 ssh-conf="/etc/ssh/sshd_config"
+ssh_conf_dir="/etc/ssh/sshd_config.d"
 
 ayuda() {
     echo "Uso del script: $0"
@@ -94,7 +95,7 @@ instalar_SSH() {
     fi
 
     # 3. Obtener el puerto configurado
-    local puerto=$(grep -E "^Port " "$ssh_conf" | awk '{print $2}')
+    local puerto=$(grep -rE "^Port " "$ssh_conf" "$sshd_conf_dir"/*.conf 2>/dev/null | awk '{print $NF}' | head -1)
     puerto=${puerto:-22}
 
     print_info "Puerto SSH configurado: $puerto"
@@ -179,7 +180,7 @@ ver_Estado() {
 
 case $1 in
     -v | --verify)  verificar_Instalacion ;;
-    -i | --install) instalar-ssh ;;
+    -i | --install) instalar_SSH ;;
     -m | --status) ver_Estado ;;
     -r | --restart) reiniciar_ssh ;;
     -? | --help)    ayuda ;;
