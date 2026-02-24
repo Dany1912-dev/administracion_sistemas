@@ -1,5 +1,5 @@
 . "$PSScriptRoot\..\lib\utils.ps1"
-
+. "$PSScriptRoot\..\tarea3\tarea3.ps1"
 # ---------- Funciones de validacion especificas de DHCP ----------
 
 function validar_Mascara {
@@ -474,6 +474,8 @@ function configuracionDHCP {
             -EndRange   $ipFinal `
             -SubnetMask $mascara `
             -State      Active
+
+        ValidarIPFija
 
         if ($gateway -ne "") {
             Set-DhcpServerv4OptionValue -ScopeId $redStr -OptionId 3 -Value $gateway
