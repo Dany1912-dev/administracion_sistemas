@@ -1,3 +1,5 @@
+. "$PSScriptRoot\..\lib\utils.ps1"
+
 # ---------- Funciones ----------
 function agregarRegistro {
     param(
@@ -9,10 +11,10 @@ function agregarRegistro {
     try {
         # -ErrorAction Stop es para que el 'catch' funcione
          Add-DNSServerResourceRecordA -Name $name -ZoneName $zoneName  -AllowUpdateAny -IPv4Address $ip  -ErrorAction Stop
-        Write-Host "El registro '$name' se ha creado correctamente."
+        Write-Host "El registro '$name' se ha creado correctamente." -ForegroundColor $verde
     }
     catch {
-        Write-Host "No se pudo crear el registro. Detalles: $($_.Exception.Message)"
+        Write-Host "No se pudo crear el registro. Detalles: $($_.Exception.Message)" -ForegroundColor $rojo
     }
 }
 
@@ -28,10 +30,10 @@ function agregarZonaPrimaria2 {
     try {
         # -ErrorAction Stop es para que el 'catch' funcione
         Add-DnsServerPrimaryZone -Name $name -ZoneFile $zoneFile -ErrorAction Stop
-        Write-Host "La zona '$name' se ha creado correctamente."
+        Write-Host "La zona '$name' se ha creado correctamente." -ForegroundColor $verde
     }
     catch {
-        Write-Host "No se pudo crear la zona. Detalles: $($_.Exception.Message)"
+        Write-Host "No se pudo crear la zona. Detalles: $($_.Exception.Message)" -ForegroundColor $rojo
     }
 }
 
@@ -44,10 +46,10 @@ function agregarZonaSecundaria {
 
     try {
         Add-DnsServerSecondaryZone -Name $name -ZoneFile $zoneFile -MasterServers $ipMS -ErrorAction Stop
-        Write-Host "La zona '$name' se ha creado correctamente."
+        Write-Host "La zona '$name' se ha creado correctamente." -ForegroundColor $verde
     }
     catch {
-        Write-Host "No se pudo crear la zona. Detalles: $($_.Exception.Message)"
+        Write-Host "No se pudo crear la zona. Detalles: $($_.Exception.Message)" -ForegroundColor $rojo
     }
 }
 
@@ -62,10 +64,10 @@ function actualizarRegistro{
         $registro.RecordData.IPv4Address = $ip
         Set-DnsServerResourceRecord -NewInputObject $registro -OldInputObject $registro -ZoneName $name  -ErrorAction Stop
 
-        Write-Host "El registro '$name' se ha actualizado correctamente."
+        Write-Host "El registro '$name' se ha actualizado correctamente." -ForegroundColor $verde
     }
     catch {
-        Write-Host "No se pudo actualizar el registro. Detalles: $($_.Exception.Message)"
+        Write-Host "No se pudo actualizar el registro. Detalles: $($_.Exception.Message)" -ForegroundColor $rojo
     }
 }
 
@@ -76,14 +78,14 @@ function eliminarZona {
     if ($cf -match '^[Ss]$'){
         try {
             Remove-DnsServerZone -Name $name -Force -ErrorAction Stop
-            Write-Host "La zona '$name' se ha eliminado correctamente."
+            Write-Host "La zona '$name' se ha eliminado correctamente." -ForegroundColor $verde
         }
         catch {
-            Write-Host "No se pudo eliminar la zona. Detalles: $($_.Exception.Message)"
+            Write-Host "No se pudo eliminar la zona. Detalles: $($_.Exception.Message)" -ForegroundColor $rojo
         }
     }
     else {
-        Write-Host "Entendido, regresando..."
+        Write-Host "Entendido, regresando..." -ForegroundColor $rosa
         return
     }
 }
@@ -96,10 +98,10 @@ function eliminarRegistro {
 
     try {
         Remove-DnsServerResourceRecord -ZoneName $zoneName -RRType A -Name $name -Force  -ErrorAction Stop
-        Write-Host "El registro '$name' se ha eliminado correctamente."
+        Write-Host "El registro '$name' se ha eliminado correctamente." -ForegroundColor $verde
     }
     catch {
-        Write-Host "No se pudo eliminar el registro. Detalles: $($_.Exception.Message)"
+        Write-Host "No se pudo eliminar el registro. Detalles: $($_.Exception.Message)" -ForegroundColor $rojo
     }
 
       
@@ -125,10 +127,10 @@ function modificarRegistro{
         # 3. Reemplazar el viejo por el nuevo
         Set-DnsServerResourceRecord -OldInputObject $oldObj -NewInputObject $newObj -ZoneName $zn -ErrorAction Stop
         
-        Write-Host "Registro actualizado con exito."
+        Write-Host "Registro actualizado con exito." -ForegroundColor Green
     }
     catch {
-        Write-Host "Error al intentar editar: $($_.Exception.Message)"
+        Write-Host "Error al intentar editar: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
@@ -149,7 +151,7 @@ function ValidarIPFija {
     $ipActual = Get-NetIPAddress -InterfaceAlias $interfaz.Name -AddressFamily IPv4 | Select-Object -First 1
 
     if ($ipActual.PrefixOrigin -eq "Dhcp" -or $ipActual.IPAddress -like "169.254.*") {
-        Write-Host "IP Dinamica (DHCP) detectada."
+        Write-Host "IP Dinamica (DHCP) detectada." -ForegroundColor Yellow
         $confirmar = Read-Host "Se detecto que no tiene IP fija, y se requiere tenerla. ¿Deseas configurarla ahora? (S/N)"
         
         if ($confirmar -eq "S") {
@@ -161,10 +163,10 @@ function ValidarIPFija {
             # El parámetro -Confirm:$false evita que pida permiso por cada paso
             New-NetIPAddress -InterfaceAlias $interfaz.Name -IPAddress $nuevaIP -PrefixLength $prefijo -DefaultGateway $gateway -Confirm:$false
             
-            Write-Host "IP configurada con exito"
+            Write-Host "IP configurada con exito" -ForegroundColor Green
         }
     } else {
-        Write-Host "Estado: IP Estatica ya configurada ($($ipActual.IPAddress))."
+        Write-Host "Estado: IP Estatica ya configurada ($($ipActual.IPAddress))." -ForegroundColor Green
         Start-Sleep -Seconds 4 
     }
 }
@@ -182,30 +184,30 @@ function configurarEscenario {
         Add-DnsServerResourceRecordA -Name "@" -ZoneName $dom -IPv4Address $ipDestino -ErrorAction Stop
         Add-DnsServerResourceRecordA -Name "www" -ZoneName $dom -IPv4Address $ipDestino -ErrorAction Stop
         
-        Write-Host "Dominio $dom configurado con exito apuntando a $ipDestino"
+        Write-Host "Dominio $dom configurado con exito apuntando a $ipDestino" -ForegroundColor Green
         
         $pr = Read-Host "Deseas hacer una prueba? (S/N)"
         if ($pr -match '^[Ss]$'){
-            Write-Host "Iniciando prueba..."
+            Write-Host "Iniciando prueba..." -ForegroundColor $rosa
             pruebasDNS -zona $dom
         }
         else {
-            Write-Host "Entendido, regresando..."
+            Write-Host "Entendido, regresando..." -ForegroundColor $rosa
             return
         }
     }
     catch {
-        Write-Host "Error: $($_.Exception.Message)"
+        Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
 function pruebasDNS {
     param([string]$zona)
 
-    Write-Host "1. Probando nslookup para $zona..."
+    Write-Host "1. Probando nslookup para $zona..." -ForegroundColor $amarillo
     nslookup $zona 127.0.0.1
     
-    Write-Host "`n2. Probando ping a www.$zona..."
+    Write-Host "`n2. Probando ping a www.$zona..." -ForegroundColor $amarillo
     ping "www.$zona" -n 2
     
     Read-Host "`nPresiona Enter para finalizar las pruebas"
@@ -215,28 +217,28 @@ function verRegistroPorZonas{
     param([string]$name)
 
     try {
-        Write-Host " ------------------------ "
-        Write-Host " Registros existentes"
-        Write-Host " ------------------------ "
+        Write-Host " ------------------------ " -BackgroundColor $rosa -ForegroundColor White
+        Write-Host " Registros existentes" -BackgroundColor $rosa -ForegroundColor White
+        Write-Host " ------------------------ " -BackgroundColor $rosa -ForegroundColor White
         Get-DnsServerResourceRecord -ZoneName $name -RRType "A"  -ErrorAction Stop | Format-Table -AutoSize
     }
     catch {
-        Write-Host "La zona '$name' no tiene registros."
+        Write-Host "La zona '$name' no tiene registros." -ForegroundColor $rojo
     }
 }
 
 function verZonas {
-    Write-Host " ------------------------ "
-    Write-Host " Zonas existentes"
-    Write-Host " ------------------------ "
+    Write-Host " ------------------------ " -BackgroundColor White -ForegroundColor $rosa 
+    Write-Host " Zonas existentes" -BackgroundColor White -ForegroundColor $rosa
+    Write-Host " ------------------------ " -BackgroundColor White -ForegroundColor $rosa
     Get-DnsServerZone   
 }
 
 function configuracionZona {
     Clear-Host
-    Write-Host "----------------------------------"
-    Write-Host "   Menu configuracion de zona "
-    Write-Host "----------------------------------"
+    Write-Host "----------------------------------" -ForegroundColor $amarillo
+    Write-Host "   Menu configuracion de zona " -ForegroundColor $amarillo
+    Write-Host "----------------------------------" -ForegroundColor $amarillo
     Write-Host "1. Ver zonas existentes" 
     Write-Host "2. Ver registros por zona" 
     Write-Host "3. Agregar zona" 
@@ -245,7 +247,7 @@ function configuracionZona {
     Write-Host "6. Eliminar registro"
     Write-Host "7. Eliminar zona"   
     Write-Host "8. Volver al menu principal" 
-    Write-Host "----------------------------------"
+    Write-Host "----------------------------------" -ForegroundColor $amarillo
     
     $opc = Read-Host "Selecciona una opcion"
     switch ($opc) {
@@ -272,7 +274,7 @@ function configuracionZona {
                 agregarZonaPrimaria2 -name $n -zoneFile $zf
             }
             else {
-                Write-Host "Entendido, regresando..."
+                Write-Host "Entendido, regresando..." -ForegroundColor $rosa
                 configuracionZona
             }
         }
@@ -313,12 +315,12 @@ function configuracionZona {
         }
 
         "8"{
-            Write-Host "`nSaliendo..."
+            Write-Host "`nSaliendo..." -ForegroundColor $rosa
             return
         }
         
         default {
-            Write-Host "Opcion no valida"
+            Write-Host "Opcion no valida" -ForegroundColor $rojo
             Start-Sleep -Seconds 1
             configuracionZona
         }
@@ -327,18 +329,18 @@ function configuracionZona {
 }
 
 function instalacionDNS {
-  Write-Host " ---------------------------- "
-  Write-Host "Instalacion de DNS Server" 
-  Write-Host " ---------------------------- " 
+  Write-Host " ---------------------------- " -ForegroundColor $rosa
+  Write-Host "Instalacion de DNS Server" -ForegroundColor $rosa
+  Write-Host " ---------------------------- " -ForegroundColor $rosa
     
     # Verificar si ya está instalado
     $dnsEstado = Get-WindowsFeature -Name *DNS*
     
     if ($DNSEstado.InstallState -eq "Installed") {
-        Write-Host "DNS server ya esta instalado"
+        Write-Host "DNS server ya esta instalado" -ForegroundColor $azul
     }
     else {
-        Write-Host "DNS server no esta instalado, iniciando instalacion..."
+        Write-Host "DNS server no esta instalado, iniciando instalacion..." -ForegroundColor $amarillo
         
         try {
             $job = Start-Job -ScriptBlock {
@@ -355,17 +357,17 @@ function instalacionDNS {
             Remove-Job -Job $job
             
             if ($result.Success) {
-                Write-Host "DNS server instalado correctamente"
+                Write-Host "DNS server instalado correctamente" -ForegroundColor $verde
                 Get-WindowsFeature -Name *DNS*
                 Start-Sleep -Seconds 2
             }
             else {
-                Write-Host "Error en la instalacion de DNS"
+                Write-Host "Error en la instalacion de DNS" -ForegroundColor $rojo
                 return
             }
         }
         catch {
-            Write-Host "Error durante la instalacion: $_"
+            Write-Host "Error durante la instalacion: $_" -ForegroundColor $rojo
             return
         }
     }
@@ -375,17 +377,17 @@ function verificarInstalacion {
     $DNSEstado = Get-WindowsFeature -Name *DNS*
 
     if ($DNSEstado.InstallState -eq "Installed") {
-        Write-Host "DNS ya se encuentra instalado"
+        Write-Host "DNS ya se encuentra instalado" -ForegroundColor $verde
     }
     else {
-        Write-Host "DNS no se encuentra instalado"
+        Write-Host "DNS no se encuentra instalado" -ForegroundColor $rojo
         $opcc = Read-Host "`nDesea instalarlo? (S/N)"
         
         if ($opcc -match '^[Ss]$') {
             instalacionDNS
         }
         else {
-            Write-Host "Entendido, regresando al menu..."
+            Write-Host "Entendido, regresando al menu..." -ForegroundColor $amarillo
             Start-Sleep -Seconds 2
         }
     }
@@ -394,16 +396,16 @@ function verificarInstalacion {
 function mostrarMenu {
     ValidarIPFija
     Clear-Host
-    Write-Host "----------------------------------"
-    Write-Host "   Menu  "
-    Write-Host "----------------------------------"
+    Write-Host "----------------------------------" -ForegroundColor $azul
+    Write-Host "   Menu  " -ForegroundColor $azul
+    Write-Host "----------------------------------" -ForegroundColor $azul
     Write-Host "1. Verificar Instalacion DNS" 
     Write-Host "2. Instalar DNS" 
     Write-Host "3. Configuracion avanzada de zonas y registros"
     Write-Host "4. Configurar dominios"
     Write-Host "5. Realizar pruebas DNS" 
     Write-Host "6. Salir" 
-    Write-Host "----------------------------------"
+    Write-Host "----------------------------------" -ForegroundColor $azul
     
     $opcion = Read-Host "Selecciona una opcion"
     
@@ -424,7 +426,7 @@ function mostrarMenu {
                 configuracionZona
             }
             else {
-                Write-Host "DNS no esta instalado. Instalelo primero."
+                Write-Host "DNS no esta instalado. Instalelo primero." -ForegroundColor $rojo
             }
             Read-Host "`nPresiona Enter para continuar"
             mostrarMenu
@@ -441,11 +443,11 @@ function mostrarMenu {
             mostrarMenu
         }
         "6" {
-            Write-Host "`nSaliendo..."
+            Write-Host "`nSaliendo..." -ForegroundColor $rosa
             exit
         }
         default {
-            Write-Host "Opcion no valida"
+            Write-Host "Opcion no valida" -ForegroundColor $rojo
             Start-Sleep -Seconds 2
             mostrarMenu
         }

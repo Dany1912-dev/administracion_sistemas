@@ -181,7 +181,7 @@ ver_Estado() {
 case $1 in
     -v | --verify)  verificar_Instalacion ;;
     -i | --install) instalar_SSH ;;
-    -m | --status) ver_Estado ;;
+    -s | --status) ver_Estado ;;
     -r | --restart) reiniciar_ssh ;;
     -? | --help)    ayuda ;;
     *)              ayuda ;;
