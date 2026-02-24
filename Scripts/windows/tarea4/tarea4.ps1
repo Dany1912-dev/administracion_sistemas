@@ -112,7 +112,13 @@ function Instalar-SSH {
     $regla = Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue
 
     if ($regla) {
-        Print-Completado "Regla de firewall ya existe"
+        if ($regla.Enabled -eq "True") {
+            Print-Completado "Regla de firewall ya existe y esta habilitada"
+        } else {
+            Print-Error "La regla existe pero esta DESHABILITADA, habilitando..."
+            Set-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -Enabled True
+            Print-Completado "Regla habilitada correctamente"
+        }
     } else {
         New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" `
             -DisplayName "OpenSSH SSH Server (sshd)" `
