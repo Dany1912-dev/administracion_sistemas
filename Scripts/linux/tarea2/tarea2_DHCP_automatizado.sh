@@ -531,6 +531,8 @@ EOF
 		sudo ip addr add $ip_Servidor/$( calcular_Bits "$mascara" ) dev $interfaz
 		sudo ip link set $interfaz up
 
+		echo "nameserver $ip_Servidor" | sudo tee /etc/resolv.conf > /dev/null
+
 sudo bash -c "cat > /etc/sysconfig/network/ifcfg-$interfaz" << EOF
 BOOTPROTO='static'
 STARTMODE='auto'
@@ -568,4 +570,5 @@ case $1 in
     -c | --config) configurar_DHCP ;;
 	-sc | --showConfig) ver_Configuracion ;;
     -? | --help) ayuda ;;
+	*) 			 ayuda ;;
 esac
