@@ -151,6 +151,10 @@ function configurar_IP_Estatica {
 
     if ($verificacion) {
         Write-Host "Verificacion exitosa - IP $ipServidor activa en $interfaz" -ForegroundColor $verde
+
+        Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses $ipServidor
+        Write-Host "DNS configurado para usar la IP del servidor" -ForegroundColor $verde
+
         return $true
     }
     else {
