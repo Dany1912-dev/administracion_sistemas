@@ -113,6 +113,7 @@ function Instalar-SSH {
 
     if ($regla) {
         if ($regla.Enabled -eq "True") {
+            Set-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -Profile Any
             Print-Completado "Regla de firewall ya existe y esta habilitada"
         } else {
             Print-Error "La regla existe pero esta DESHABILITADA, habilitando..."
