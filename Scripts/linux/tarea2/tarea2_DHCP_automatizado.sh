@@ -531,6 +531,7 @@ EOF
 		sudo ip addr add $ip_Servidor/$( calcular_Bits "$mascara" ) dev $interfaz
 		sudo ip link set $interfaz up
 
+		#Configurar dns del servidor con la ip del servidor para que pueda resolver nombres
 		echo "nameserver $ip_Servidor" | sudo tee /etc/resolv.conf > /dev/null
 
 sudo bash -c "cat > /etc/sysconfig/network/ifcfg-$interfaz" << EOF
