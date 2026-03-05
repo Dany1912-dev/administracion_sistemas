@@ -86,7 +86,7 @@ function New-ACLRule-NoDelete {
         [string]$Type = "Allow"
     )
     
-    # Permisos específicos SIN Delete ni DeleteSubdirectoriesAndFiles en carpeta raíz
+    # Permisos específicos SIN Delete
     $permissions = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
                    [System.Security.AccessControl.FileSystemRights]::Write -bor
                    [System.Security.AccessControl.FileSystemRights]::CreateFiles -bor
@@ -94,8 +94,7 @@ function New-ACLRule-NoDelete {
                    [System.Security.AccessControl.FileSystemRights]::WriteAttributes -bor
                    [System.Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
                    [System.Security.AccessControl.FileSystemRights]::ReadAttributes -bor
-                   [System.Security.AccessControl.FileSystemRights]::ReadExtendedAttributes -bor
-                   [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles
+                   [System.Security.AccessControl.FileSystemRights]::ReadExtendedAttributes
     
     return New-Object System.Security.AccessControl.FileSystemAccessRule(
         $Identity, 
@@ -103,6 +102,21 @@ function New-ACLRule-NoDelete {
         "ContainerInherit,ObjectInherit", 
         "None", 
         $Type
+    )
+}
+
+# ============================================================================
+# FUNCION: Crear regla Deny para Delete (evita que se borre la carpeta raíz)
+# ============================================================================
+function New-ACLRule-DenyDelete {
+    param([object]$Identity)
+    
+    return New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $Identity, 
+        [System.Security.AccessControl.FileSystemRights]::Delete,
+        "None",  # No heredar - solo esta carpeta
+        "None", 
+        "Deny"
     )
 }
 
@@ -268,17 +282,22 @@ function Crear-Estructura-Base {
     Set-FolderACL -Path "$FTP_ROOT\LocalUser\Public\general" -Rules @(
         (New-ACLRule $ID_ADMINS "FullControl"),
         (New-ACLRule $ID_SYSTEM "FullControl"),
-        (New-ACLRule-NoDelete $ID_AUTH),
+        (New-ACLRule $ID_AUTH   "Modify"),
+        (New-ACLRule-DenyDelete $ID_AUTH),
         (New-ACLRule $ID_IUSR   "ReadAndExecute")
     )
     Print-Ok "Permisos 'general' configurados (usuarios NO pueden borrar la carpeta)."
 
     # --- Permisos carpetas de grupo: grupo puede escribir pero NO borrar la carpeta
     foreach ($grupo in @($GRUPO_REPROBADOS, $GRUPO_RECURSADORES)) {
+        # Obtener identidad del grupo para Deny
+        $grupoIdentity = New-Object System.Security.Principal.NTAccount($grupo)
+        
         Set-FolderACL -Path "$FTP_ROOT\LocalUser\$grupo" -Rules @(
             (New-ACLRule $ID_ADMINS "FullControl"),
             (New-ACLRule $ID_SYSTEM "FullControl"),
-            (New-ACLRule-NoDelete $grupo)
+            (New-ACLRule $grupo     "Modify"),
+            (New-ACLRule-DenyDelete $grupoIdentity)
             # IUSR no tiene regla aqui: sin acceso a carpetas de grupo
         )
         Print-Ok "Permisos '$grupo' configurados (grupo NO puede borrar la carpeta)."
@@ -429,7 +448,8 @@ function Construir-Jaula-Usuario {
     Set-FolderACL -Path $personal -Rules @(
         (New-ACLRule $ID_ADMINS   "FullControl"),
         (New-ACLRule $ID_SYSTEM   "FullControl"),
-        (New-ACLRule-NoDelete $userAccount)
+        (New-ACLRule $userAccount "Modify"),
+        (New-ACLRule-DenyDelete $userAccount)
     )
     Print-Ok "  Carpeta personal: $personal (usuario NO puede borrarla)"
 
