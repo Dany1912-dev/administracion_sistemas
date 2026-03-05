@@ -441,7 +441,7 @@ function Construir-Jaula-Usuario {
     Set-FolderACL -Path $jaula -Rules @(
         (New-ACLRule $ID_ADMINS   "FullControl"),
         (New-ACLRule $ID_SYSTEM   "FullControl"),
-        (New-ACLRule $userAccount "Modify")
+        (New-ACLRule $userAccount "ReadAndExecute")
     )
 
     # Permisos carpeta personal (usuario NO puede borrar su propia carpeta raíz)
@@ -722,7 +722,7 @@ function Gestionar-Usuarios {
                 do { $usuario = (Read-Host "Nombre de usuario").Trim() } `
                     while (-not (Validar-Usuario -usuario $usuario))
 
-                do { $password = (Read-Host "Contrasena").Trim() } `
+                do { $password = (Read-Host "Contrasena (Que tenga al menos 8 caracteres, una mayuscula, un numero y un caracter especial)").Trim() } `
                     while ([string]::IsNullOrWhiteSpace($password))
 
                 Write-Host "  1) $GRUPO_REPROBADOS"
