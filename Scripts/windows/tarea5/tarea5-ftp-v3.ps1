@@ -77,6 +77,36 @@ function New-ACLRule {
 }
 
 # ============================================================================
+# FUNCION: Crear regla ACL SIN permiso Delete (para carpetas compartidas)
+# Permite crear/modificar contenido pero NO borrar la carpeta raíz
+# ============================================================================
+function New-ACLRule-NoDelete {
+    param(
+        [object]$Identity,
+        [string]$Type = "Allow"
+    )
+    
+    # Permisos específicos SIN Delete ni DeleteSubdirectoriesAndFiles en carpeta raíz
+    $permissions = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+                   [System.Security.AccessControl.FileSystemRights]::Write -bor
+                   [System.Security.AccessControl.FileSystemRights]::CreateFiles -bor
+                   [System.Security.AccessControl.FileSystemRights]::CreateDirectories -bor
+                   [System.Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+                   [System.Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+                   [System.Security.AccessControl.FileSystemRights]::ReadAttributes -bor
+                   [System.Security.AccessControl.FileSystemRights]::ReadExtendedAttributes -bor
+                   [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles
+    
+    return New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $Identity, 
+        $permissions,
+        "ContainerInherit,ObjectInherit", 
+        "None", 
+        $Type
+    )
+}
+
+# ============================================================================
 # FUNCION: Aplicar ACL limpia a una carpeta
 # ============================================================================
 function Set-FolderACL {
@@ -234,24 +264,24 @@ function Crear-Estructura-Base {
         (New-ACLRule $ID_IUSR   "ReadAndExecute")
     )
 
-    # --- Permisos general: autenticados escriben, IUSR solo lee
+    # --- Permisos general: autenticados escriben pero NO pueden borrar la carpeta
     Set-FolderACL -Path "$FTP_ROOT\LocalUser\Public\general" -Rules @(
         (New-ACLRule $ID_ADMINS "FullControl"),
         (New-ACLRule $ID_SYSTEM "FullControl"),
-        (New-ACLRule $ID_AUTH   "Modify"),
+        (New-ACLRule-NoDelete $ID_AUTH),
         (New-ACLRule $ID_IUSR   "ReadAndExecute")
     )
-    Print-Ok "Permisos 'general' configurados."
+    Print-Ok "Permisos 'general' configurados (usuarios NO pueden borrar la carpeta)."
 
-    # --- Permisos carpetas de grupo: IUSR sin acceso, solo el grupo respectivo
+    # --- Permisos carpetas de grupo: grupo puede escribir pero NO borrar la carpeta
     foreach ($grupo in @($GRUPO_REPROBADOS, $GRUPO_RECURSADORES)) {
         Set-FolderACL -Path "$FTP_ROOT\LocalUser\$grupo" -Rules @(
             (New-ACLRule $ID_ADMINS "FullControl"),
             (New-ACLRule $ID_SYSTEM "FullControl"),
-            (New-ACLRule $grupo     "Modify")
+            (New-ACLRule-NoDelete $grupo)
             # IUSR no tiene regla aqui: sin acceso a carpetas de grupo
         )
-        Print-Ok "Permisos '$grupo' configurados (anonimo sin acceso)."
+        Print-Ok "Permisos '$grupo' configurados (grupo NO puede borrar la carpeta)."
     }
 
     Print-Ok "Estructura base lista."
@@ -395,13 +425,13 @@ function Construir-Jaula-Usuario {
         (New-ACLRule $userAccount "Modify")
     )
 
-    # Permisos carpeta personal
+    # Permisos carpeta personal (usuario NO puede borrar su propia carpeta raíz)
     Set-FolderACL -Path $personal -Rules @(
         (New-ACLRule $ID_ADMINS   "FullControl"),
         (New-ACLRule $ID_SYSTEM   "FullControl"),
-        (New-ACLRule $userAccount "Modify")
+        (New-ACLRule-NoDelete $userAccount)
     )
-    Print-Ok "  Carpeta personal: $personal"
+    Print-Ok "  Carpeta personal: $personal (usuario NO puede borrarla)"
 
     # Junction: general -> C:\ftp\LocalUser\Public\general (compartida todos)
     $jGeneral = "$jaula\general"
