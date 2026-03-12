@@ -1,10 +1,10 @@
 #!/bin/bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
+source "$SCRIPT_DIR/funciones_http.sh"
 source "$SCRIPT_DIR/../lib/utils.sh"
 source "$SCRIPT_DIR/../lib/validaciones.sh"
-source "$SCRIPT_DIR/funciones_http.sh"
+
 
 readonly INTERFAZ_RED="enp0s9"
 readonly PUERTOS_RESERVADOS=(22 21 23 25 53 443 3306 5432 6379 27017)

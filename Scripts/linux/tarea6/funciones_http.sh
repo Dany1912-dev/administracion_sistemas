@@ -1,8 +1,8 @@
 #!/bin/bash
 
-FUNC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$FUNC_DIR/../lib/utils.sh"
-source "$FUNC_DIR/../lib/validaciones.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+source "$SCRIPT_DIR/../lib/validaciones.sh"
 
 VERSION_ELEGIDA=""
 PUERTO_ELEGIDO=""
