@@ -377,7 +377,7 @@ instalar_tomcat() {
     fi
 
     print_info "Descargando Tomcat $VERSION_ELEGIDA..."
-    if ! curl -L --progress-bar -o "$tarball" "$url" 2>&1; then
+    if ! curl -k -L --progress-bar -o "$tarball" "$url" 2>&1; then
         print_error "Fallo la descarga."
         print_info  "URL: $url"
         return 1
