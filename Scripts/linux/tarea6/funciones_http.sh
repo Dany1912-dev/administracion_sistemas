@@ -41,17 +41,28 @@ obtener_versiones_zypper() {
 }
 
 obtener_versiones_tomcat() {
-    # Usar archive.apache.org que es más estable
-    local base_url="https://archive.apache.org/dist/tomcat/"
-    local ramas
+    print_info "Consultando versiones disponibles de Tomcat..." >&2
 
-    print_info "Consultando versiones en archive.apache.org..." >&2
+    # Solo versiones modernas y soportadas (9, 10, 11)
+    local ramas_soportadas=(9 10 11)
+    local versiones=()
 
-    ramas=$(curl -k -s --max-time 8 "$base_url" 2>/dev/null \
-        | grep -oP 'tomcat-\K[0-9]+(?=/)' \
-        | sort -uV)
+    for rama in "${ramas_soportadas[@]}"; do
+        local base_url="https://archive.apache.org/dist/tomcat/tomcat-${rama}/"
+        
+        # Obtener la última versión de esta rama
+        local latest
+        latest=$(curl -k -s --max-time 8 "$base_url" 2>/dev/null \
+            | grep -oP "v\K[0-9]+\.[0-9]+\.[0-9]+" \
+            | sort -V | tail -1)
+        
+        if [[ -n "$latest" ]]; then
+            versiones+=("$latest")
+        fi
+    done
 
-    if [[ -z "$ramas" ]]; then
+    # Si no se pudieron obtener versiones online, usar versiones de referencia
+    if [[ ${#versiones[@]} -eq 0 ]]; then
         print_info "Sin acceso a internet. Usando versiones de referencia." >&2
         echo "9.0.102"
         echo "10.1.40"
@@ -59,15 +70,8 @@ obtener_versiones_tomcat() {
         return
     fi
 
-    # Obtener solo las versiones más recientes de cada rama
-    while IFS= read -r rama; do
-        local latest
-        # Para cada rama, obtener la última versión
-        latest=$(curl -k -s --max-time 8 "${base_url}tomcat-${rama}/" 2>/dev/null \
-            | grep -oP "v\K[0-9]+\.[0-9]+\.[0-9]+" \
-            | sort -V | tail -1)
-        [[ -n "$latest" ]] && echo "$latest"
-    done <<< "$ramas"
+    # Mostrar versiones ordenadas
+    printf '%s\n' "${versiones[@]}" | sort -V
 }
 
 # =============== MENU VERSIONES ===============
