@@ -83,7 +83,7 @@ function pedirPuerto {
         if ([string]::IsNullOrWhiteSpace($inp)) { $inp = "$default" }
         if ($inp -notmatch '^\d+$') { Write-Warn "Ingresa solo numeros."; continue }
         $puerto = [int]$inp
-        if ($puerto -ne 80 -and ($puerto -lt 1024 -or $puerto -gt 65535)) {
+        if ($puerto -ne 80 -and ($puerto -lt 100 -or $puerto -gt 65535)) {
             Write-Warn "Puerto fuera de rango. Usa 80 o entre 1024 y 65535."
             continue
         }
