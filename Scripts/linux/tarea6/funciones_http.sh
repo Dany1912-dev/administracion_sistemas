@@ -41,12 +41,13 @@ obtener_versiones_zypper() {
 }
 
 obtener_versiones_tomcat() {
-    local base_url="https://dlcdn.apache.org/tomcat/"
+    # Usar archive.apache.org que es más estable
+    local base_url="https://archive.apache.org/dist/tomcat/"
     local ramas
 
-    print_info "Consultando versiones en dlcdn.apache.org..." >&2
+    print_info "Consultando versiones en archive.apache.org..." >&2
 
-    ramas=$(curl -s --max-time 8 "$base_url" 2>/dev/null \
+    ramas=$(curl -k -s --max-time 8 "$base_url" 2>/dev/null \
         | grep -oP 'tomcat-\K[0-9]+(?=/)' \
         | sort -uV)
 
@@ -58,9 +59,11 @@ obtener_versiones_tomcat() {
         return
     fi
 
+    # Obtener solo las versiones más recientes de cada rama
     while IFS= read -r rama; do
         local latest
-        latest=$(curl -s --max-time 8 "${base_url}tomcat-${rama}/" 2>/dev/null \
+        # Para cada rama, obtener la última versión
+        latest=$(curl -k -s --max-time 8 "${base_url}tomcat-${rama}/" 2>/dev/null \
             | grep -oP "v\K[0-9]+\.[0-9]+\.[0-9]+" \
             | sort -V | tail -1)
         [[ -n "$latest" ]] && echo "$latest"
@@ -362,8 +365,14 @@ instalar_tomcat() {
     print_titulo "Instalando Apache Tomcat $VERSION_ELEGIDA..."
 
     local rama="${VERSION_ELEGIDA%%.*}"
-    local url="https://dlcdn.apache.org/tomcat/tomcat-${rama}/v${VERSION_ELEGIDA}/bin/apache-tomcat-${VERSION_ELEGIDA}.tar.gz"
     local tarball="/tmp/apache-tomcat-${VERSION_ELEGIDA}.tar.gz"
+    
+    # Lista de URLs a intentar (en orden de prioridad)
+    local urls=(
+        "https://archive.apache.org/dist/tomcat/tomcat-${rama}/v${VERSION_ELEGIDA}/bin/apache-tomcat-${VERSION_ELEGIDA}.tar.gz"
+        "https://dlcdn.apache.org/tomcat/tomcat-${rama}/v${VERSION_ELEGIDA}/bin/apache-tomcat-${VERSION_ELEGIDA}.tar.gz"
+        "http://archive.apache.org/dist/tomcat/tomcat-${rama}/v${VERSION_ELEGIDA}/bin/apache-tomcat-${VERSION_ELEGIDA}.tar.gz"
+    )
 
     if ! command -v java &>/dev/null; then
         print_info "Java no encontrado. Instalando OpenJDK 21..."
@@ -377,16 +386,36 @@ instalar_tomcat() {
     fi
 
     print_info "Descargando Tomcat $VERSION_ELEGIDA..."
-    if ! curl -k -L --progress-bar -o "$tarball" "$url" 2>&1; then
-        print_error "Fallo la descarga."
-        print_info  "URL: $url"
+    
+    local descarga_exitosa=false
+    for url in "${urls[@]}"; do
+        print_info "Intentando: $url"
+        if curl -k -f -L --connect-timeout 10 --max-time 120 --progress-bar -o "$tarball" "$url" 2>&1; then
+            # Verificar que el archivo descargado es realmente un tar.gz
+            if file "$tarball" | grep -q "gzip compressed"; then
+                descarga_exitosa=true
+                print_completado "Descarga exitosa desde: $url"
+                break
+            else
+                print_error "Archivo descargado no es tar.gz valido"
+                rm -f "$tarball"
+            fi
+        else
+            print_error "Fallo la descarga desde: $url"
+        fi
+    done
+    
+    if [ "$descarga_exitosa" = false ]; then
+        print_error "No se pudo descargar Tomcat desde ninguna URL."
+        print_info "Intentalo manualmente desde: https://tomcat.apache.org/download-${rama}0.cgi"
         return 1
     fi
 
     print_info "Extrayendo en /opt/tomcat..."
     mkdir -p /opt/tomcat
-    if ! tar xzf "$tarball" -C /opt/tomcat --strip-components=1; then
+    if ! tar xzf "$tarball" -C /opt/tomcat --strip-components=1 2>&1; then
         print_error "Fallo la extraccion."
+        print_info "El archivo descargado puede estar corrupto."
         rm -f "$tarball"
         return 1
     fi
