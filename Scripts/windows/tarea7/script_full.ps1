@@ -808,11 +808,12 @@ function Descargar-DesdeFTP {
 
     Write-Title "Conectando al Repositorio FTP"
 
-    $servicioFTP = $servicio.ToLower()
-    $ftpPath = "$FTP_BASE_PATH/$servicioFTP/"
+    # Las carpetas en el FTP tienen mayuscula inicial: Apache, Nginx, IIS
+    $ftpPath = "$FTP_BASE_PATH/$servicio/"
 
     try {
-        $archivosDisponibles = switch ($servicio) {
+        # Nota: [array] evita que PowerShell desenvuelva un array de un elemento como string
+        [array]$archivosDisponibles = switch ($servicio) {
             "Nginx"  { @("nginx-1.22.1.zip", "nginx-1.24.0.zip") }
             "Apache" { @("httpd-2.4.66-260223-Win64-VS18.zip")   }
             "IIS"    { @("iis-config.msi")                        }
