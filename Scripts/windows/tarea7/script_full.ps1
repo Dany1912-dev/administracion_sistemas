@@ -358,9 +358,9 @@ function instalarApache {
             if ($httpd) { $apacheRoot = Split-Path (Split-Path $httpd.FullName) }
         }
         if (-not $apacheRoot) { Write-Err "No se encontro httpd.exe."; return }
-        }
     }
     if (-not $apacheRoot) { Write-Err "No se encontro la instalacion de Apache."; return }
+
     Write-Ok "Apache instalado en: $apacheRoot"
 
     $httpdConf = "$apacheRoot\conf\httpd.conf"
