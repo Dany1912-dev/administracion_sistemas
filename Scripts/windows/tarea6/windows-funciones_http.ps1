@@ -235,49 +235,126 @@ function instalarIIS {
 
 # =============== INSTALAR APACHE ===============
 function instalarApache {
-    param([int]$puerto)
+    param(
+        [int]$puerto,
+        [string]$archivoLocal = ""
+    )
     Write-Title "Instalando Apache HTTP Server..."
-    Asegurar-Chocolatey
-
-    Write-Info "Consultando versiones disponibles de apache-httpd..."
-    $rawVersiones = choco search apache-httpd --exact --all-versions --limit-output 2>$null
-    $versiones = @()
-    foreach ($linea in $rawVersiones) {
-        if ($linea -match '\|') {
-            $ver = ($linea -split '\|')[1].Trim()
-            if ($ver -match '^\d+\.\d+' -and $versiones -notcontains $ver) { $versiones += $ver }
+    
+    $versionElegida = ""
+    $apacheRoot = ""
+    
+    # Si viene archivo local (FTP), instalar desde ahí
+    if ($archivoLocal -and (Test-Path $archivoLocal)) {
+        Write-Info "Instalando desde archivo local: $archivoLocal"
+        
+        # Extraer versión del nombre del archivo
+        $nombreArchivo = [System.IO.Path]::GetFileNameWithoutExtension($archivoLocal)
+        if ($nombreArchivo -match 'httpd-(\d+\.\d+\.\d+)') {
+            $versionElegida = $matches[1]
+        } elseif ($nombreArchivo -match 'apache.*?(\d+\.\d+\.\d+)') {
+            $versionElegida = $matches[1]
+        } else {
+            $versionElegida = "local"
         }
-    }
-    if ($versiones.Count -eq 0) { Write-Err "No se encontraron versiones. Verifica internet."; return }
-
-    Write-Host ""
-    Write-Host "Versiones disponibles:" -ForegroundColor Cyan
-    $limite = [Math]::Min($versiones.Count, 3)
-    for ($i = 0; $i -lt $limite; $i++) {
-        $etiqueta = switch ($i) {
-            0 { "[Latest - Desarrollo]" } 1 { "[Estable anterior]" } 2 { "[LTS]" }
+        
+        # Instalar en C:\Apache24
+        $apacheRoot = "C:\Apache24"
+        
+        Write-Info "Extrayendo a: $apacheRoot..."
+        
+        # Limpiar instalación anterior si existe
+        if (Test-Path $apacheRoot) {
+            Write-Warn "Eliminando instalacion anterior..."
+            Stop-Service Apache* -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+            Remove-Item -Path $apacheRoot -Recurse -Force
         }
-        Write-Host "  $($i+1). $($versiones[$i])  $etiqueta"
+        
+        # Extraer ZIP
+        try {
+            # Crear directorio temporal para extracción
+            $tempExtract = "$env:TEMP\apache_extract"
+            if (Test-Path $tempExtract) {
+                Remove-Item -Path $tempExtract -Recurse -Force
+            }
+            New-Item -ItemType Directory -Path $tempExtract -Force | Out-Null
+            
+            Expand-Archive -Path $archivoLocal -DestinationPath $tempExtract -Force
+            
+            # Buscar carpeta Apache*/Apache24 dentro del ZIP
+            $apacheFolders = Get-ChildItem -Path $tempExtract -Directory -Recurse | Where-Object { 
+                $_.Name -match '^Apache' -and (Test-Path "$($_.FullName)\bin\httpd.exe")
+            }
+            
+            if ($apacheFolders) {
+                $sourceFolder = $apacheFolders[0].FullName
+                Write-Info "Copiando desde: $sourceFolder"
+                
+                # Crear C:\Apache24 y copiar
+                New-Item -ItemType Directory -Path $apacheRoot -Force | Out-Null
+                Copy-Item -Path "$sourceFolder\*" -Destination $apacheRoot -Recurse -Force
+                
+                # Limpiar temporal
+                Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
+                
+                Write-Ok "Apache extraido correctamente"
+            } else {
+                Write-Err "No se encontro httpd.exe en el archivo"
+                return
+            }
+        } catch {
+            Write-Err "Error al extraer: $_"
+            return
+        }
+        
+    } else {
+        # Instalación desde WEB (Chocolatey)
+        Asegurar-Chocolatey
+
+        Write-Info "Consultando versiones disponibles de apache-httpd..."
+        $rawVersiones = choco search apache-httpd --exact --all-versions --limit-output 2>$null
+        $versiones = @()
+        foreach ($linea in $rawVersiones) {
+            if ($linea -match '\|') {
+                $ver = ($linea -split '\|')[1].Trim()
+                if ($ver -match '^\d+\.\d+' -and $versiones -notcontains $ver) { $versiones += $ver }
+            }
+        }
+        if ($versiones.Count -eq 0) { Write-Err "No se encontraron versiones. Verifica internet."; return }
+
+        Write-Host ""
+        Write-Host "Versiones disponibles:" -ForegroundColor Cyan
+        $limite = [Math]::Min($versiones.Count, 3)
+        for ($i = 0; $i -lt $limite; $i++) {
+            $etiqueta = switch ($i) {
+                0 { "[Latest - Desarrollo]" } 1 { "[Estable anterior]" } 2 { "[LTS]" }
+            }
+            Write-Host "  $($i+1). $($versiones[$i])  $etiqueta"
+        }
+        Write-Host ""
+        do { $selVer = Read-Host "Selecciona version (1-$limite)" } while ($selVer -notmatch "^[1-$limite]$")
+        $versionElegida = $versiones[[int]$selVer - 1]
+
+        Write-Info "Instalando Apache $versionElegida en puerto $puerto..."
+        choco install apache-httpd `
+            --version="$versionElegida" `
+            --params="`"/port:$puerto /installLocation:C:\Apache24`"" `
+            --yes --no-progress --force 2>&1 | Out-Null
+
+        if ($LASTEXITCODE -ne 0) { Write-Err "Fallo la instalacion. Codigo: $LASTEXITCODE"; return }
+        Refrescar-Path
+
+        # Buscar donde quedo instalado
+        $posibles = @("C:\Apache24","$env:APPDATA\Apache24","$env:LOCALAPPDATA\Apache24")
+        $apacheRoot = $posibles | Where-Object { Test-Path "$_\bin\httpd.exe" } | Select-Object -First 1
+        if (-not $apacheRoot) {
+            $httpd = Get-ChildItem "C:\" -Filter "httpd.exe" -Recurse `
+                -ErrorAction SilentlyContinue -Depth 6 | Select-Object -First 1
+            if ($httpd) { $apacheRoot = Split-Path (Split-Path $httpd.FullName) }
+        }
+        if (-not $apacheRoot) { Write-Err "No se encontro httpd.exe."; return }
     }
-    Write-Host ""
-    do { $selVer = Read-Host "Selecciona version (1-$limite)" } while ($selVer -notmatch "^[1-$limite]$")
-    $versionElegida = $versiones[[int]$selVer - 1]
-
-    Write-Info "Instalando Apache $versionElegida en puerto $puerto..."
-    choco install apache-httpd `
-        --version="$versionElegida" `
-        --params="`"/port:$puerto /installLocation:C:\Apache24`"" `
-        --yes --no-progress --force 2>&1 | Out-Null
-
-    if ($LASTEXITCODE -ne 0) { Write-Err "Fallo la instalacion. Codigo: $LASTEXITCODE"; return }
-    Refrescar-Path
-
-    # Buscar donde quedo instalado (el param /installLocation no siempre aplica)
-    $posibles = @("C:\Apache24","$env:APPDATA\Apache24","$env:LOCALAPPDATA\Apache24")
-    $apacheRoot = $posibles | Where-Object { Test-Path "$_\bin\httpd.exe" } | Select-Object -First 1
-    if (-not $apacheRoot) {
-        $httpd = Get-ChildItem "C:\" -Filter "httpd.exe" -Recurse `
-            -ErrorAction SilentlyContinue -Depth 6 | Select-Object -First 1
         if ($httpd) { $apacheRoot = $httpd.DirectoryName -replace '\\bin$','' }
     }
     if (-not $apacheRoot) { Write-Err "No se encontro la instalacion de Apache."; return }
