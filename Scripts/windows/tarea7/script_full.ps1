@@ -1091,8 +1091,8 @@ SSLSessionCacheTimeout  300
             $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
             # Rutas con forward slash para nginx.conf
-            $certFwd = $certFile -replace '\', '/'
-            $keyFwd  = $keyFile  -replace '\', '/'
+            $certFwd = $certFile.Replace('\', '/')
+            $keyFwd  = $keyFile.Replace('\', '/')
 
             $nginxConfContent = @"
 worker_processes  1;
