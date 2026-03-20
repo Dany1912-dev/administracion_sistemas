@@ -923,6 +923,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 # ── Flujo principal ───────────────────────────────────────────────────────────
+Asegurar-Chocolatey
 Preparar-Entorno
 Menu-Principal
 Seleccionar-Fuente
