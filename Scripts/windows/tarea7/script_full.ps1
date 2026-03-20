@@ -915,6 +915,278 @@ function Descargar-DesdeFTP {
     }
 }
 
+
+# =============== CONFIGURAR SSL (OpenSSL) ===============
+function Configurar-SSL {
+    param(
+        [string]$servicio,
+        [int]$puertoHTTP,
+        [string]$apacheRoot = "C:\Apache24",
+        [string]$nginxRoot  = ""
+    )
+
+    $puertoHTTPS = $puertoHTTP + 1
+    Write-Title "Configurando SSL/TLS (HTTPS en puerto $puertoHTTPS)"
+
+    # ── 1. Asegurar OpenSSL ───────────────────────────────────────────────────
+    $opensslExe = $null
+    # Buscar openssl.exe en rutas conocidas
+    $candidatos = @(
+        "$apacheRoot\bin\openssl.exe",
+        "C:\Program Files\OpenSSL-Win64\bin\openssl.exe",
+        "C:\Program Files (x86)\OpenSSL-Win32\bin\openssl.exe",
+        "C:\tools\openssl\openssl.exe"
+    )
+    foreach ($c in $candidatos) {
+        if (Test-Path $c) { $opensslExe = $c; break }
+    }
+    if (-not $opensslExe) {
+        $found = Get-Command openssl -ErrorAction SilentlyContinue
+        if ($found) { $opensslExe = $found.Source }
+    }
+    if (-not $opensslExe) {
+        Write-Info "OpenSSL no encontrado. Instalando via Chocolatey..."
+        choco install openssl --yes --no-progress 2>&1 | Out-Null
+        Refrescar-Path
+        $found = Get-Command openssl -ErrorAction SilentlyContinue
+        if ($found) {
+            $opensslExe = $found.Source
+            Write-Ok "OpenSSL instalado: $opensslExe"
+        } else {
+            Write-Err "No se pudo instalar OpenSSL. SSL cancelado."
+            return
+        }
+    } else {
+        Write-Ok "OpenSSL encontrado: $opensslExe"
+    }
+
+    # ── 2. Directorios de certificados ───────────────────────────────────────
+    $certDir = "$SSL_DIR\certs"
+    $keyDir  = "$SSL_DIR\private"
+    if (-not (Test-Path $certDir))  { New-Item -ItemType Directory -Path $certDir  -Force | Out-Null }
+    if (-not (Test-Path $keyDir))   { New-Item -ItemType Directory -Path $keyDir   -Force | Out-Null }
+
+    $keyFile  = "$keyDir\server.key"
+    $certFile = "$certDir\server.crt"
+    $csrFile  = "$certDir\server.csr"
+    $cnfFile  = "$certDir\openssl.cnf"
+
+    # ── 3. Generar openssl.cnf con SAN ───────────────────────────────────────
+    Write-Info "Generando configuracion OpenSSL..."
+    $hostname = $env:COMPUTERNAME
+    $cnfContent = @"
+[req]
+default_bits       = 2048
+prompt             = no
+default_md         = sha256
+distinguished_name = dn
+x509_extensions    = v3_req
+
+[dn]
+C  = MX
+ST = Estado
+L  = Ciudad
+O  = Practica7
+OU = SysAdmin
+CN = $hostname
+
+[v3_req]
+subjectAltName = @alt_names
+keyUsage       = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = $hostname
+IP.1  = 127.0.0.1
+"@
+    [System.IO.File]::WriteAllText($cnfFile, $cnfContent, (New-Object System.Text.UTF8Encoding $false))
+
+    # ── 4. Generar clave privada y certificado autofirmado ───────────────────
+    Write-Info "Generando clave privada (2048 bits)..."
+    & $opensslExe genrsa -out $keyFile 2048 2>&1 | Out-Null
+    if (-not (Test-Path $keyFile)) { Write-Err "Error generando clave privada."; return }
+    Write-Ok "Clave privada generada: $keyFile"
+
+    Write-Info "Generando certificado autofirmado (365 dias)..."
+    & $opensslExe req -new -x509 -key $keyFile -out $certFile -days 365 -config $cnfFile 2>&1 | Out-Null
+    if (-not (Test-Path $certFile)) { Write-Err "Error generando certificado."; return }
+    Write-Ok "Certificado generado: $certFile"
+
+    # ── 5. Configurar el servidor ─────────────────────────────────────────────
+    switch ($servicio) {
+
+        "Apache" {
+            $httpdConf = "$apacheRoot\conf\httpd.conf"
+
+            # Activar modulos SSL si estan comentados
+            $conf = Get-Content $httpdConf -Raw
+            $conf = $conf -replace '#(LoadModule ssl_module)',       '$1'
+            $conf = $conf -replace '#(LoadModule socache_shmcb_module)', '$1'
+            $conf = $conf -replace '#(Include conf/extra/httpd-ssl.conf)', '$1'
+            Set-Content $httpdConf $conf -Encoding UTF8
+            Write-Ok "Modulos SSL activados en httpd.conf"
+
+            # Escribir httpd-ssl.conf
+            $sslConf = "$apacheRoot\conf\extra\httpd-ssl.conf"
+            $sslContent = @"
+Listen $puertoHTTPS
+
+SSLCipherSuite HIGH:MEDIUM:!MD5:!RC4:!3DES
+SSLProxyCipherSuite HIGH:MEDIUM:!MD5:!RC4:!3DES
+SSLHonorCipherOrder on
+SSLProtocol all -SSLv3
+SSLProxyProtocol all -SSLv3
+SSLPassPhraseDialog  builtin
+SSLSessionCache        "shmcb:`${SRVROOT}/logs/ssl_scache(512000)"
+SSLSessionCacheTimeout  300
+
+<VirtualHost _default_:$puertoHTTPS>
+    DocumentRoot "`${SRVROOT}/htdocs"
+    ServerName localhost:$puertoHTTPS
+    ErrorLog "`${SRVROOT}/logs/error_ssl.log"
+    TransferLog "`${SRVROOT}/logs/access_ssl.log"
+    SSLEngine on
+    SSLCertificateFile    "$certFile"
+    SSLCertificateKeyFile "$keyFile"
+    <FilesMatch "\.(cgi|shtml|phtml|php)$">
+        SSLOptions +StdEnvVars
+    </FilesMatch>
+    <Directory "`${SRVROOT}/cgi-bin">
+        SSLOptions +StdEnvVars
+    </Directory>
+    BrowserMatch "MSIE [2-5]" nokeepalive ssl-unclean-shutdown downgrade-1.0 force-response-1.0
+    CustomLog "`${SRVROOT}/logs/ssl_request.log" "%t %h %{SSL_PROTOCOL}x %{SSL_CIPHER}x "%r" %b"
+</VirtualHost>
+"@
+            $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+            [System.IO.File]::WriteAllText($sslConf, $sslContent, $utf8NoBom)
+            Write-Ok "httpd-ssl.conf configurado (puerto HTTPS: $puertoHTTPS)"
+
+            # Validar y reiniciar
+            $test = & "$apacheRoot\bin\httpd.exe" -t 2>&1
+            if ($test -match "Syntax OK") {
+                Write-Ok "Configuracion valida."
+                Restart-Service Apache2.4 -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 3
+                $svc = Get-Service Apache2.4 -ErrorAction SilentlyContinue
+                if ($svc -and $svc.Status -eq "Running") {
+                    Write-Ok "Apache reiniciado con SSL activo"
+                } else {
+                    Write-Err "Apache no arranco tras activar SSL. Revisa: $apacheRoot\logs\error_ssl.log"
+                }
+            } else {
+                Write-Err "Error en configuracion SSL:"
+                Write-Host $test -ForegroundColor Red
+            }
+
+            configurarFirewall -puertoNuevo $puertoHTTPS -puertoViejo 0 -nombreServicio "Apache-SSL"
+        }
+
+        "Nginx" {
+            if (-not $nginxRoot) { $nginxRoot = Obtener-Ruta-Nginx }
+            if (-not $nginxRoot) { Write-Err "No se encontro Nginx."; return }
+
+            $nginxConf = "$nginxRoot\conf\nginx.conf"
+            $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+
+            # Rutas con forward slash para nginx.conf
+            $certFwd = $certFile -replace '\', '/'
+            $keyFwd  = $keyFile  -replace '\', '/'
+
+            $nginxConfContent = @"
+worker_processes  1;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+    server_tokens off;
+    sendfile        on;
+    keepalive_timeout  65;
+
+    # HTTP - redirige a HTTPS
+    server {
+        listen       $puertoHTTP;
+        server_name  localhost;
+        return 301 https://`$host:$puertoHTTPS`$request_uri;
+    }
+
+    # HTTPS
+    server {
+        listen       $puertoHTTPS ssl;
+        server_name  localhost;
+
+        ssl_certificate     $certFwd;
+        ssl_certificate_key $keyFwd;
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+        ssl_session_cache   shared:SSL:10m;
+        ssl_session_timeout 10m;
+
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+
+        location / {
+            root   html;
+            index  index.html index.htm;
+            autoindex off;
+        }
+
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html { root html; }
+    }
+}
+"@
+            [System.IO.File]::WriteAllText($nginxConf, $nginxConfContent, $utf8NoBom)
+            Write-Ok "nginx.conf actualizado con SSL (HTTP:$puertoHTTP -> HTTPS:$puertoHTTPS)"
+
+            # Reiniciar servicio nginx
+            $serviceName = "nginx-$puertoHTTP"
+            Restart-Service $serviceName -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 3
+            $svc = Get-Service $serviceName -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -eq "Running") {
+                Write-Ok "Nginx reiniciado con SSL activo"
+            } else {
+                Write-Err "Nginx no arranco tras activar SSL."
+                Write-Info "Revisa: $nginxRoot\logs\error.log"
+            }
+
+            configurarFirewall -puertoNuevo $puertoHTTPS -puertoViejo 0 -nombreServicio "Nginx-SSL"
+        }
+
+        "IIS" {
+            Write-Info "IIS: Importando certificado al store de Windows..."
+            $cert = Import-Certificate -FilePath $certFile -CertStoreLocation Cert:\LocalMachine\My -ErrorAction SilentlyContinue
+            if (-not $cert) {
+                # Import-Certificate no acepta .crt directamente en algunas versiones, usar certutil
+                & certutil -addstore -f "MY" $certFile 2>&1 | Out-Null
+                $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.Subject -match "Practica7" } | Select-Object -First 1
+            }
+            if ($cert) {
+                $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
+                & $appcmd set site "Default Web Site" /+bindings:"https/*:${puertoHTTPS}:" 2>&1 | Out-Null
+                & netsh http add sslcert ipport=0.0.0.0:$puertoHTTPS certhash=$($cert.Thumbprint) appid="{00000000-0000-0000-0000-000000000000}" 2>&1 | Out-Null
+                Write-Ok "SSL configurado en IIS (puerto HTTPS: $puertoHTTPS)"
+                configurarFirewall -puertoNuevo $puertoHTTPS -puertoViejo 0 -nombreServicio "IIS-SSL"
+                iisreset /noforce 2>&1 | Out-Null
+            } else {
+                Write-Err "No se pudo importar el certificado en IIS."
+            }
+        }
+    }
+
+    Write-Ok "SSL/TLS configurado correctamente"
+    Write-Info "HTTP  : http://localhost:$puertoHTTP"
+    Write-Info "HTTPS : https://localhost:$puertoHTTPS"
+    Write-Warn "El certificado es autofirmado. El navegador mostrara advertencia de seguridad (esperado)."
+}
+
 # ── Verificar Administrador ───────────────────────────────────────────────────
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -948,6 +1220,9 @@ $script:PUERTO_ELEGIDO = pedirPuerto -default 80
 switch ($SERVICIO_ACTUAL) {
     "IIS" {
         instalarIIS -puerto $PUERTO_ELEGIDO
+        if ($CONFIGURAR_SSL) {
+            Configurar-SSL -servicio "IIS" -puertoHTTP $PUERTO_ELEGIDO
+        }
     }
     "Apache" {
         if ($ARCHIVO_DESCARGADO) {
@@ -955,12 +1230,18 @@ switch ($SERVICIO_ACTUAL) {
         } else {
             instalarApache -puerto $PUERTO_ELEGIDO
         }
+        if ($CONFIGURAR_SSL) {
+            Configurar-SSL -servicio "Apache" -puertoHTTP $PUERTO_ELEGIDO -apacheRoot "C:\Apache24"
+        }
     }
     "Nginx" {
         if ($ARCHIVO_DESCARGADO) {
             instalarNginx -puerto $PUERTO_ELEGIDO -archivoLocal $ARCHIVO_DESCARGADO
         } else {
             instalarNginx -puerto $PUERTO_ELEGIDO
+        }
+        if ($CONFIGURAR_SSL) {
+            Configurar-SSL -servicio "Nginx" -puertoHTTP $PUERTO_ELEGIDO
         }
     }
 }
