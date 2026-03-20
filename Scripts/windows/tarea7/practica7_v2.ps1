@@ -8,7 +8,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . "$scriptDir\..\tarea6\windows-funciones_http.ps1"
 
 # Variables globales
-$FTP_SERVER = "192.168.100.139"
+$FTP_SERVER = "192.168.1.68"
 $FTP_USER = "ftprepo"
 $FTP_PASS = "Repo123!"
 $FTP_BASE_PATH = "/http/Windows"
@@ -240,64 +240,52 @@ function Generar-CertificadoSSL {
     
     Write-Title "Generando Certificado SSL Autofirmado"
     
-    # Verificar que OpenSSL está disponible
-    $opensslPath = (Get-Command openssl -ErrorAction SilentlyContinue).Source
+    # Buscar OpenSSL en Git primero
+    $opensslPaths = @(
+        "C:\Program Files\Git\usr\bin\openssl.exe",
+        "C:\Program Files\Git\mingw64\bin\openssl.exe",
+        "C:\ProgramData\chocolatey\bin\openssl.exe"
+    )
     
-    if (-not $opensslPath) {
-        Write-Err "OpenSSL no encontrado en PATH"
-        Write-Info "Instalando OpenSSL..."
-        
-        Asegurar-Chocolatey
-        choco install openssl -y --force
-        
-        # Refrescar PATH
-        Refrescar-Path
-        
-        $opensslPath = (Get-Command openssl -ErrorAction SilentlyContinue).Source
-        
-        if (-not $opensslPath) {
-            Write-Err "No se pudo instalar OpenSSL"
-            return $false
+    $opensslExe = $null
+    foreach ($path in $opensslPaths) {
+        if (Test-Path $path) {
+            $opensslExe = $path
+            break
         }
     }
     
-    Write-Info "Usando OpenSSL: $opensslPath"
+    if (-not $opensslExe) {
+        Write-Err "OpenSSL no encontrado"
+        return $false
+    }
+    
+    Write-Info "Usando OpenSSL: $opensslExe"
     
     # Generar certificado
     try {
-        $process = Start-Process -FilePath "openssl" -ArgumentList @(
-            "req", "-x509", "-nodes", "-days", "365",
-            "-newkey", "rsa:2048",
-            "-keyout", "`"$keyFile`"",
-            "-out", "`"$certFile`"",
-            "-subj", "/C=MX/ST=BajaCalifornia/L=Tijuana/O=Reprobados/OU=IT/CN=www.reprobados.com"
-        ) -NoNewWindow -Wait -PassThru
+        $result = & $opensslExe req -x509 -nodes -days 365 -newkey rsa:2048 `
+            -keyout $keyFile `
+            -out $certFile `
+            -subj "/C=MX/ST=BajaCalifornia/L=Tijuana/O=Reprobados/OU=IT/CN=www.reprobados.com" 2>&1
         
-        if ($process.ExitCode -ne 0) {
-            Write-Err "OpenSSL fallo con codigo: $($process.ExitCode)"
+        Start-Sleep -Seconds 1
+        
+        if ((Test-Path $certFile) -and (Test-Path $keyFile)) {
+            Write-Ok "Certificado SSL generado"
+            Write-Info "  Certificado: $certFile"
+            Write-Info "  Clave: $keyFile"
+            return $true
+        } else {
+            Write-Err "Error: certificados no generados"
             return $false
         }
     } catch {
         Write-Err "Error ejecutando OpenSSL: $_"
         return $false
     }
-    
-    Start-Sleep -Seconds 1
-    
-    if ((Test-Path $certFile) -and (Test-Path $keyFile)) {
-        Write-Ok "Certificado SSL generado"
-        Write-Info "  Certificado: $certFile"
-        Write-Info "  Clave: $keyFile"
-        return $true
-    } else {
-        Write-Err "Archivos de certificado no encontrados"
-        Write-Info "Esperados:"
-        Write-Info "  $certFile"
-        Write-Info "  $keyFile"
-        return $false
-    }
 }
- 
+
 # ============================================================================
 # FUNCION: Configurar IIS con SSL
 # ============================================================================
@@ -474,7 +462,9 @@ http {
 }
 "@
     
-    Set-Content $nginxConf $sslConfig -Encoding UTF8
+    # En lugar de Set-Content, usa WriteAllLines para evitar BOM
+    $Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
+    [System.IO.File]::WriteAllLines($nginxConf, $sslConfig, $Utf8NoBomEncoding)
     
     Write-Ok "Nginx configurado con HTTPS en puerto $puerto"
 }

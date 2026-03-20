@@ -341,51 +341,105 @@ Header always set X-Content-Type-Options "nosniff"
 
 # =============== INSTALAR NGINX ===============
 function instalarNginx {
-    param([int]$puerto)
+    param(
+        [int]$puerto,
+        [string]$archivoLocal = ""
+    )
     Write-Title "Instalando Nginx..."
-    Asegurar-Chocolatey
-
-    Write-Info "Consultando versiones disponibles de Nginx..."
-    $rawVersiones = choco search nginx --exact --all-versions --limit-output 2>$null
-    $versiones = @()
-    foreach ($linea in $rawVersiones) {
-        if ($linea -match '\|') {
-            $ver = ($linea -split '\|')[1].Trim()
-            if ($ver -match '^\d+\.\d+' -and $versiones -notcontains $ver) { $versiones += $ver }
+    
+    $versionElegida = ""
+    $nginxRoot = ""
+    
+    # Si viene archivo local (FTP), instalar desde ahí
+    if ($archivoLocal -and (Test-Path $archivoLocal)) {
+        Write-Info "Instalando desde archivo local: $archivoLocal"
+        
+        # Extraer versión del nombre del archivo
+        $nombreArchivo = [System.IO.Path]::GetFileNameWithoutExtension($archivoLocal)
+        if ($nombreArchivo -match 'nginx-(\d+\.\d+\.\d+)') {
+            $versionElegida = $matches[1]
+        } else {
+            $versionElegida = "local"
         }
+        
+        # Determinar carpeta de instalación
+        $nginxRoot = "C:\tools\nginx-$versionElegida"
+        
+        Write-Info "Extrayendo a: $nginxRoot..."
+        
+        # Crear directorio si no existe
+        if (Test-Path $nginxRoot) {
+            Write-Warn "Eliminando instalacion anterior..."
+            Remove-Item -Path $nginxRoot -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $nginxRoot -Force | Out-Null
+        
+        # Extraer ZIP
+        try {
+            Expand-Archive -Path $archivoLocal -DestinationPath "C:\tools" -Force
+            
+            # Buscar la carpeta extraída
+            $extractedFolders = Get-ChildItem -Path "C:\tools" -Directory | Where-Object { $_.Name -match '^nginx' }
+            if ($extractedFolders) {
+                $extractedFolder = $extractedFolders[0].FullName
+                if ($extractedFolder -ne $nginxRoot) {
+                    Move-Item -Path "$extractedFolder\*" -Destination $nginxRoot -Force
+                    Remove-Item -Path $extractedFolder -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+            
+            Write-Ok "Nginx extraido correctamente"
+        } catch {
+            Write-Err "Error al extraer: $_"
+            return
+        }
+        
+    } else {
+        # Instalación desde WEB (Chocolatey)
+        Asegurar-Chocolatey
+
+        Write-Info "Consultando versiones disponibles de Nginx..."
+        $rawVersiones = choco search nginx --exact --all-versions --limit-output 2>$null
+        $versiones = @()
+        foreach ($linea in $rawVersiones) {
+            if ($linea -match '\|') {
+                $ver = ($linea -split '\|')[1].Trim()
+                if ($ver -match '^\d+\.\d+' -and $versiones -notcontains $ver) { $versiones += $ver }
+            }
+        }
+        if ($versiones.Count -eq 0) { Write-Err "No se encontraron versiones de Nginx."; return }
+
+        $mainline = $versiones | Where-Object {
+            $p = $_ -split '\.'; $p.Count -ge 2 -and ([int]$p[1] % 2 -ne 0)
+        } | Select-Object -First 1
+        $stable = $versiones | Where-Object {
+            $p = $_ -split '\.'; $p.Count -ge 2 -and ([int]$p[1] % 2 -eq 0)
+        } | Select-Object -First 1
+        if (-not $mainline) { $mainline = $versiones[0] }
+        if (-not $stable)   { $stable   = if ($versiones.Count -ge 2) { $versiones[1] } else { $versiones[0] } }
+
+        Write-Host ""
+        Write-Host "Versiones disponibles:" -ForegroundColor Cyan
+        Write-Host "  1. $mainline  [Mainline - Desarrollo]"
+        Write-Host "  2. $stable    [Stable - LTS]"
+        Write-Host ""
+        do { $selVer = Read-Host "Selecciona version (1/2)" } while ($selVer -notmatch '^[12]$')
+        $versionElegida = if ($selVer -eq "1") { $mainline } else { $stable }
+
+        Write-Info "Instalando Nginx $versionElegida..."
+        choco install nginx --version="$versionElegida" --yes --no-progress --force 2>&1 | Out-Null
+        Refrescar-Path
+
+        # Verificar que nginx.exe exista
+        $nginxRootCheck = Obtener-Ruta-Nginx
+        if (-not $nginxRootCheck) {
+            Write-Err "No se encontro nginx.exe. Verifica la instalacion de Chocolatey."
+            Write-Info "Intenta manualmente: choco install nginx --version=$versionElegida --force"
+            return
+        }
+        Write-Ok "Nginx $versionElegida disponible en: $nginxRootCheck"
+        $nginxRoot = $nginxRootCheck
     }
-    if ($versiones.Count -eq 0) { Write-Err "No se encontraron versiones de Nginx."; return }
-
-    $mainline = $versiones | Where-Object {
-        $p = $_ -split '\.'; $p.Count -ge 2 -and ([int]$p[1] % 2 -ne 0)
-    } | Select-Object -First 1
-    $stable = $versiones | Where-Object {
-        $p = $_ -split '\.'; $p.Count -ge 2 -and ([int]$p[1] % 2 -eq 0)
-    } | Select-Object -First 1
-    if (-not $mainline) { $mainline = $versiones[0] }
-    if (-not $stable)   { $stable   = if ($versiones.Count -ge 2) { $versiones[1] } else { $versiones[0] } }
-
-    Write-Host ""
-    Write-Host "Versiones disponibles:" -ForegroundColor Cyan
-    Write-Host "  1. $mainline  [Mainline - Desarrollo]"
-    Write-Host "  2. $stable    [Stable - LTS]"
-    Write-Host ""
-    do { $selVer = Read-Host "Selecciona version (1/2)" } while ($selVer -notmatch '^[12]$')
-    $versionElegida = if ($selVer -eq "1") { $mainline } else { $stable }
-
-    Write-Info "Instalando Nginx $versionElegida..."
-    choco install nginx --version="$versionElegida" --yes --no-progress --force 2>&1 | Out-Null
-    # choco puede retornar exit 0 aunque no reinstale (ya instalado); no cortar aqui
-    Refrescar-Path
-
-    # Verificar que nginx.exe exista antes de continuar
-    $nginxRootCheck = Obtener-Ruta-Nginx
-    if (-not $nginxRootCheck) {
-        Write-Err "No se encontro nginx.exe. Verifica la instalacion de Chocolatey."
-        Write-Info "Intenta manualmente: choco install nginx --version=$versionElegida --force"
-        return
-    }
-    Write-Ok "Nginx $versionElegida disponible en: $nginxRootCheck"
 
     if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
         Write-Info "Instalando NSSM..."
