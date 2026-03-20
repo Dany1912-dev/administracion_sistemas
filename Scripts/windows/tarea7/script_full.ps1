@@ -1023,9 +1023,9 @@ IP.1  = 127.0.0.1
             # Se usa UTF8 sin BOM para no corromper httpd.conf
             $utf8NoBom = New-Object System.Text.UTF8Encoding $false
             $conf = [System.IO.File]::ReadAllText($httpdConf)
-            $conf = $conf -replace '#(LoadModule ssl_module\s)',              '$1'
-            $conf = $conf -replace '#(LoadModule socache_shmcb_module\s)',    '$1'
-            $conf = $conf -replace '#(Include conf/extra/httpd-ssl\.conf)',   '$1'
+            $conf = $conf -replace '# *(LoadModule ssl_module)',           '$1'
+            $conf = $conf -replace '# *(LoadModule socache_shmcb_module)', '$1'
+            $conf = $conf -replace '# *(Include conf/extra/httpd-ssl\.conf)', '$1'
             [System.IO.File]::WriteAllText($httpdConf, $conf, $utf8NoBom)
 
             # Verificar que los modulos quedaron activos
