@@ -793,6 +793,13 @@ function Menu-Principal {
 }
 
 function Seleccionar-Fuente {
+    # IIS no requiere fuente externa - siempre se instala desde Windows
+    if ($SERVICIO_ACTUAL -eq "IIS") {
+        $script:FUENTE_INSTALACION = "WINDOWS"
+        Write-Info "IIS se instala directamente desde las caracteristicas de Windows."
+        return
+    }
+
     Write-Host ""
     Write-Info "Desde donde desea instalar $SERVICIO_ACTUAL?"
     Write-Host "  [W] WEB - Chocolatey/Repositorios oficiales"
@@ -819,7 +826,7 @@ function Descargar-DesdeFTP {
         [array]$archivosDisponibles = switch ($servicio) {
             "Nginx"  { @("nginx-1.22.1.zip", "nginx-1.24.0.zip") }
             "Apache" { @("httpd-2.4.66-260223-Win64-VS18.zip")   }
-            "IIS"    { @("iis-config.msi")                        }
+            "IIS"    { @() }  # IIS se instala desde Windows, no desde FTP
             default  { @() }
         }
 
@@ -1219,7 +1226,7 @@ Write-Host ""
 $sslResp = Read-Host "Desea activar SSL/TLS? [S/N]"
 $script:CONFIGURAR_SSL = $sslResp -match '^[SsYy]$'
 
-if ($FUENTE_INSTALACION -eq "FTP") {
+if ($FUENTE_INSTALACION -eq "FTP" -and $SERVICIO_ACTUAL -ne "IIS") {
     $script:ARCHIVO_DESCARGADO = Descargar-DesdeFTP -servicio $SERVICIO_ACTUAL
     if (-not $ARCHIVO_DESCARGADO) {
         Write-Host "[x] Descarga FTP fallida. Verifique conexion y credenciales." -ForegroundColor Red
@@ -1228,6 +1235,8 @@ if ($FUENTE_INSTALACION -eq "FTP") {
         Write-Host "[i] Ruta base: $FTP_BASE_PATH"    -ForegroundColor Cyan
         exit 1
     }
+} elseif ($SERVICIO_ACTUAL -eq "IIS") {
+    Write-Host "[i] IIS se instala desde Windows directamente (no requiere descarga FTP)." -ForegroundColor Cyan
 }
 
 $script:PUERTO_ELEGIDO = pedirPuerto -default 80
