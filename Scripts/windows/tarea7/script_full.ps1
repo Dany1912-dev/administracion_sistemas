@@ -1183,22 +1183,84 @@ http {
         }
 
         "IIS" {
-            Write-Info "IIS: Importando certificado al store de Windows..."
-            $cert = Import-Certificate -FilePath $certFile -CertStoreLocation Cert:\LocalMachine\My -ErrorAction SilentlyContinue
-            if (-not $cert) {
-                # Import-Certificate no acepta .crt directamente en algunas versiones, usar certutil
-                & certutil -addstore -f "MY" $certFile 2>&1 | Out-Null
-                $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.Subject -match "Practica7" } | Select-Object -First 1
+            Write-Info "IIS: Preparando certificado PFX con clave privada..."
+
+            $pfxFile = "$SSL_DIR\certs\server.pfx"
+            $pfxPass = "practica7ssl"
+
+            # Combinar .crt + .key en un .pfx usando OpenSSL
+            & $opensslExe pkcs12 -export `
+                -out $pfxFile `
+                -inkey $keyFile `
+                -in $certFile `
+                -passout pass:$pfxPass 2>&1 | Out-Null
+
+            if (-not (Test-Path $pfxFile)) {
+                Write-Err "No se pudo generar el archivo PFX."
+                return
             }
-            if ($cert) {
-                $appcmd = "$env:SystemRoot\system32\inetsrv\appcmd.exe"
-                & $appcmd set site "Default Web Site" /+bindings:"https/*:${puertoHTTPS}:" 2>&1 | Out-Null
-                & netsh http add sslcert ipport=0.0.0.0:$puertoHTTPS certhash=$($cert.Thumbprint) appid="{00000000-0000-0000-0000-000000000000}" 2>&1 | Out-Null
-                Write-Ok "SSL configurado en IIS (puerto HTTPS: $puertoHTTPS)"
-                configurarFirewall -puertoNuevo $puertoHTTPS -puertoViejo 0 -nombreServicio "IIS-SSL"
-                iisreset /noforce 2>&1 | Out-Null
+            Write-Ok "PFX generado: $pfxFile"
+
+            # Importar PFX al store LocalMachine\My (incluye clave privada)
+            Write-Info "Importando PFX al store de Windows..."
+            $secPass = ConvertTo-SecureString $pfxPass -AsPlainText -Force
+            $cert = Import-PfxCertificate `
+                -FilePath $pfxFile `
+                -CertStoreLocation Cert:\LocalMachine\My `
+                -Password $secPass `
+                -ErrorAction Stop
+
+            if (-not $cert) {
+                Write-Err "No se pudo importar el PFX."
+                return
+            }
+            Write-Ok "Certificado importado. Thumbprint: $($cert.Thumbprint)"
+
+            # Agregar binding HTTPS usando WebAdministration
+            Import-Module WebAdministration -ErrorAction SilentlyContinue
+
+            # Eliminar binding anterior si existe
+            $bindingExistente = Get-WebBinding -Name "Default Web Site" -Protocol https -Port $puertoHTTPS -ErrorAction SilentlyContinue
+            if ($bindingExistente) {
+                Remove-WebBinding -Name "Default Web Site" -Protocol https -Port $puertoHTTPS
+            }
+
+            # Crear el binding HTTPS
+            New-WebBinding -Name "Default Web Site" -Protocol https -Port $puertoHTTPS -IPAddress "*"
+            Write-Ok "Binding HTTPS agregado en IIS (puerto $puertoHTTPS)"
+
+            # Asignar certificado al binding
+            $binding = Get-WebBinding -Name "Default Web Site" -Protocol https -Port $puertoHTTPS
+            $binding.AddSslCertificate($cert.Thumbprint, "My")
+            Write-Ok "Certificado asignado al binding HTTPS"
+
+            # Eliminar sslcert anterior si existe y registrar el nuevo
+            & netsh http delete sslcert ipport=0.0.0.0:$puertoHTTPS 2>&1 | Out-Null
+            $appId = "{$(New-Guid)}"
+            $result = & netsh http add sslcert ipport=0.0.0.0:$puertoHTTPS `
+                certhash=$($cert.Thumbprint) `
+                appid="$appId" 2>&1
+            if ($result -match "SSL Certificate successfully added") {
+                Write-Ok "Certificado SSL registrado en netsh"
             } else {
-                Write-Err "No se pudo importar el certificado en IIS."
+                Write-Warn "netsh output: $result"
+            }
+
+            configurarFirewall -puertoNuevo $puertoHTTPS -puertoViejo 0 -nombreServicio "IIS-SSL"
+
+            # Reiniciar IIS
+            Write-Info "Reiniciando IIS..."
+            & iisreset /noforce 2>&1 | Out-Null
+            Start-Sleep -Seconds 3
+
+            # Verificar que responde en HTTPS
+            try {
+                $resp = Invoke-WebRequest -Uri "https://localhost:$puertoHTTPS" `
+                    -UseBasicParsing -SkipCertificateCheck -ErrorAction Stop
+                Write-Ok "IIS respondiendo en https://localhost:$puertoHTTPS"
+            } catch {
+                Write-Warn "IIS no respondio en HTTPS aun. Puede tardar unos segundos."
+                Write-Info "Prueba manualmente: https://localhost:$puertoHTTPS"
             }
         }
     }
