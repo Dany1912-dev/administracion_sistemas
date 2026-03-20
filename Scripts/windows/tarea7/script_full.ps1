@@ -378,9 +378,12 @@ function instalarApache {
 ServerTokens Prod
 ServerSignature Off
 
-<LimitExcept GET POST HEAD>
-    Require all denied
-</LimitExcept>
+# LimitExcept debe ir dentro de un bloque <Directory>
+<Directory "/">
+    <LimitExcept GET POST HEAD>
+        Require all denied
+    </LimitExcept>
+</Directory>
 
 Header always set X-Frame-Options "SAMEORIGIN"
 Header always set X-Content-Type-Options "nosniff"
