@@ -1217,22 +1217,45 @@ http {
             Write-Ok "Certificado importado. Thumbprint: $($cert.Thumbprint)"
 
             # Agregar binding HTTPS usando WebAdministration
-            Import-Module WebAdministration -ErrorAction SilentlyContinue
+            Import-Module WebAdministration -ErrorAction Stop
+
+            # Verificar que el certificado fue importado correctamente
+            Write-Info "Buscando certificado en store..."
+            $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.Subject -match "Practica7" } | Select-Object -First 1
+            if (-not $cert) {
+                Write-Err "Certificado no encontrado en Cert:\LocalMachine\My"
+                Write-Info "Certificados disponibles:"
+                Get-ChildItem Cert:\LocalMachine\My | ForEach-Object { Write-Host "  $($_.Subject) [$($_.Thumbprint)]" }
+                return
+            }
+            Write-Ok "Certificado encontrado. Thumbprint: $($cert.Thumbprint)"
 
             # Eliminar binding anterior si existe
             $bindingExistente = Get-WebBinding -Name "Default Web Site" -Protocol https -Port $puertoHTTPS -ErrorAction SilentlyContinue
             if ($bindingExistente) {
+                Write-Info "Eliminando binding HTTPS anterior..."
                 Remove-WebBinding -Name "Default Web Site" -Protocol https -Port $puertoHTTPS
             }
 
             # Crear el binding HTTPS
+            Write-Info "Creando binding HTTPS en puerto $puertoHTTPS..."
             New-WebBinding -Name "Default Web Site" -Protocol https -Port $puertoHTTPS -IPAddress "*"
-            Write-Ok "Binding HTTPS agregado en IIS (puerto $puertoHTTPS)"
+            Write-Ok "Binding HTTPS creado"
 
             # Asignar certificado al binding
+            Write-Info "Asignando certificado al binding..."
             $binding = Get-WebBinding -Name "Default Web Site" -Protocol https -Port $puertoHTTPS
+            if (-not $binding) {
+                Write-Err "No se pudo obtener el binding HTTPS recien creado"
+                return
+            }
             $binding.AddSslCertificate($cert.Thumbprint, "My")
             Write-Ok "Certificado asignado al binding HTTPS"
+
+            # Verificar binding final
+            $bindingFinal = Get-WebBinding -Name "Default Web Site"
+            Write-Info "Bindings activos:"
+            $bindingFinal | ForEach-Object { Write-Host "  $($_.protocol)://*:$($_.bindingInformation)" -ForegroundColor Cyan }
 
             # Eliminar sslcert anterior si existe y registrar el nuevo
             & netsh http delete sslcert ipport=0.0.0.0:$puertoHTTPS 2>&1 | Out-Null
