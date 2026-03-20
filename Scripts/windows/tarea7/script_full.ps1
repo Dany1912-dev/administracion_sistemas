@@ -1020,12 +1020,28 @@ IP.1  = 127.0.0.1
             $httpdConf = "$apacheRoot\conf\httpd.conf"
 
             # Activar modulos SSL si estan comentados
-            $conf = Get-Content $httpdConf -Raw
-            $conf = $conf -replace '#(LoadModule ssl_module)',       '$1'
-            $conf = $conf -replace '#(LoadModule socache_shmcb_module)', '$1'
-            $conf = $conf -replace '#(Include conf/extra/httpd-ssl.conf)', '$1'
-            Set-Content $httpdConf $conf -Encoding UTF8
-            Write-Ok "Modulos SSL activados en httpd.conf"
+            # Se usa UTF8 sin BOM para no corromper httpd.conf
+            $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+            $conf = [System.IO.File]::ReadAllText($httpdConf)
+            $conf = $conf -replace '#(LoadModule ssl_module\s)',              '$1'
+            $conf = $conf -replace '#(LoadModule socache_shmcb_module\s)',    '$1'
+            $conf = $conf -replace '#(Include conf/extra/httpd-ssl\.conf)',   '$1'
+            [System.IO.File]::WriteAllText($httpdConf, $conf, $utf8NoBom)
+
+            # Verificar que los modulos quedaron activos
+            $confCheck = [System.IO.File]::ReadAllText($httpdConf)
+            $sslMod    = $confCheck -match 'LoadModule ssl_module'
+            $shmcbMod  = $confCheck -match 'LoadModule socache_shmcb_module'
+            $sslInc    = $confCheck -match 'Include conf/extra/httpd-ssl\.conf'
+            if ($sslMod -and $shmcbMod -and $sslInc) {
+                Write-Ok "Modulos SSL activados en httpd.conf"
+            } else {
+                Write-Warn "No se pudieron activar todos los modulos SSL automaticamente."
+                Write-Info "Verifica manualmente en httpd.conf:"
+                Write-Info "  LoadModule ssl_module modules/mod_ssl.so"
+                Write-Info "  LoadModule socache_shmcb_module modules/mod_socache_shmcb.so"
+                Write-Info "  Include conf/extra/httpd-ssl.conf"
+            }
 
             # Escribir httpd-ssl.conf
             $sslConf = "$apacheRoot\conf\extra\httpd-ssl.conf"
