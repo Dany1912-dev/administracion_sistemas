@@ -1072,7 +1072,6 @@ SSLSessionCacheTimeout  300
         SSLOptions +StdEnvVars
     </Directory>
     BrowserMatch "MSIE [2-5]" nokeepalive ssl-unclean-shutdown downgrade-1.0 force-response-1.0
-    CustomLog "`${SRVROOT}/logs/ssl_request.log" "%t %h %{SSL_PROTOCOL}x %{SSL_CIPHER}x "%r" %b"
 </VirtualHost>
 "@
             $utf8NoBom = New-Object System.Text.UTF8Encoding $false
