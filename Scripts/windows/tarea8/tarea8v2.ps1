@@ -11,7 +11,7 @@
 # -----------------------------------------------
 $DOMINIO       = "empresa.local"
 $DC_PATH       = "DC=empresa,DC=local"
-$RUTA_CSV      = "C:\Users\dleyva\Desktop\pruebaSergio\csv8.csv"
+$RUTA_CSV      = "C:\Users\dleyva\Desktop\administracion_sistemas\Scripts\windows\tarea8\csv8.csv"
 $RUTA_PERFILES = "C:\Perfiles"
 $SHARE_NAME    = "HomeUsers"
 $PASSWORD      = "P@ssw0rd123!"
