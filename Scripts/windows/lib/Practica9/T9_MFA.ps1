@@ -25,7 +25,7 @@ function Registrar-Usuario-Token {
     $clave = Generar-ClaveTOTP
     & $MULTIOTP_EXE -createga $Sam $clave | Out-Null
 
-    if ($LASTEXITCODE -eq 0) {
+    if ($LASTEXITCODE -eq 11) {
         & $MULTIOTP_EXE -set $Sam prefix-pin=0 | Out-Null
         Print-Ok "  $Sam registrado"
 
