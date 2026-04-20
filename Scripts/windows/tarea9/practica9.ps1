@@ -1,3 +1,5 @@
+#Requires -RunAsAdministrator
+
 function Print-Ok   { param($msg) Write-Host "[OK]   $msg" -ForegroundColor Green  }
 function Print-Info { param($msg) Write-Host "[INFO] $msg" -ForegroundColor Cyan   }
 function Print-Warn { param($msg) Write-Host "[WARN] $msg" -ForegroundColor Yellow }

@@ -1,5 +1,3 @@
-$DC_PATH = "DC=empresa,DC=local"
-
 $ROLES_VALIDOS = @("identidad", "storage", "politicas", "auditoria")
 
 $GRUPOS_ROLES = @{

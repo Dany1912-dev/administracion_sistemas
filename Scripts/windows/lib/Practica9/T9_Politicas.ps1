@@ -1,5 +1,4 @@
-$DC_PATH      = "DC=empresa,DC=local"
-$RUTA_REPORTE = "C:\Users\dleyva\reporte_accesos.txt"
+$RUTA_REPORTE = "$env:USERPROFILE\reporte_accesos.txt"
 
 
 function Crear-Grupos {

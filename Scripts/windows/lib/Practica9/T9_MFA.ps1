@@ -3,7 +3,7 @@ $MULTIOTP_REG  = "Registry::HKEY_CLASSES_ROOT\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF
 $MULTIOTP_MSI  = "$PSScriptRoot\multiOTP.msi"
 $VCREDIST_EXE  = "$PSScriptRoot\VC_redist.x64.exe"
 $CSV_USUARIOS  = "$PSScriptRoot\usuarios_p9.csv"
-$RUTA_CLAVES   = "C:\Users\dleyva\claves_mfa.txt"
+$RUTA_CLAVES   = "$env:USERPROFILE\claves_mfa.txt"
 $DOMINIO_MFA   = "empresa.local"
 
 
@@ -25,7 +25,7 @@ function Registrar-Usuario-Token {
     $clave = Generar-ClaveTOTP
     & $MULTIOTP_EXE -createga $Sam $clave | Out-Null
 
-    if ($LASTEXITCODE -eq 11) {
+    if ($LASTEXITCODE -eq 0) {
         & $MULTIOTP_EXE -set $Sam prefix-pin=0 | Out-Null
         Print-Ok "  $Sam registrado"
 
@@ -105,18 +105,19 @@ function Registrar-Usuarios-MFA {
     "" | Out-File $RUTA_CLAVES -Append -Encoding UTF8
 
     Write-Host ""
-    Print-Info "Registrando Administrador..."
+    Print-Info "Registrando Administrador (builtin)..."
     Registrar-Usuario-Token -Sam "Administrador"
 
-    if (Test-Path $CSV_USUARIOS) {
-        Write-Host ""
-        Print-Info "Registrando usuarios del CSV..."
-        $usuarios = Import-Csv $CSV_USUARIOS
-        foreach ($u in $usuarios) {
-            Registrar-Usuario-Token -Sam $u.Usuario
+    Write-Host ""
+    Print-Info "Registrando miembros de GrupoAdmins..."
+
+    $admins = Get-ADGroupMember -Identity "GrupoAdmins" -ErrorAction SilentlyContinue
+    if ($admins) {
+        foreach ($a in $admins) {
+            Registrar-Usuario-Token -Sam $a.SamAccountName
         }
     } else {
-        Print-Warn "CSV no encontrado."
+        Print-Warn "GrupoAdmins vacio o no encontrado."
     }
 
     Write-Host ""
