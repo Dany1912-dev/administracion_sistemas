@@ -107,11 +107,12 @@ function Registrar-Usuarios-MFA {
     Write-Host ""
     Print-Info "Registrando miembros del grupo Administradores..."
 
-    $admins = Get-LocalGroupMember -Name "Administradores" -ErrorAction SilentlyContinue
+    $grupoAdmins = Get-ADGroup -Filter { SID -eq "S-1-5-32-544" } -ErrorAction SilentlyContinue
+    $admins = if ($grupoAdmins) { Get-ADGroupMember -Identity $grupoAdmins -Recursive -ErrorAction SilentlyContinue } else { $null }
+
     if ($admins) {
         foreach ($a in $admins) {
-            $sam = $a.Name -replace "^.*\\", ""
-            Registrar-Usuario-Token -Sam $sam
+            Registrar-Usuario-Token -Sam $a.SamAccountName
         }
     } else {
         Print-Warn "No se encontraron miembros en el grupo Administradores."
