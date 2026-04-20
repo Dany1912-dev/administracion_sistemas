@@ -6,14 +6,6 @@ $CSV_USUARIOS  = "$PSScriptRoot\usuarios_p9.csv"
 $RUTA_CLAVES   = "C:\Users\dleyva\claves_mfa.txt"
 $DOMINIO_MFA   = "empresa.local"
 
-$ADMINS_MFA = @(
-    "dleyva",
-    "admin_identidad",
-    "admin_storage",
-    "admin_politicas",
-    "admin_auditoria"
-)
-
 
 function Generar-ClaveTOTP {
     $base32Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
@@ -37,10 +29,10 @@ function Registrar-Usuario-Token {
         & $MULTIOTP_EXE -set $Sam prefix-pin=0 | Out-Null
         Print-Ok "  $Sam registrado"
 
-        "Usuario: $Sam"                              | Out-File $RUTA_CLAVES -Append -Encoding UTF8
-        "  Nombre en GA: $Sam@$DOMINIO_MFA"          | Out-File $RUTA_CLAVES -Append -Encoding UTF8
-        "  Clave:        $clave"                     | Out-File $RUTA_CLAVES -Append -Encoding UTF8
-        ""                                           | Out-File $RUTA_CLAVES -Append -Encoding UTF8
+        "Usuario: $Sam"                     | Out-File $RUTA_CLAVES -Append -Encoding UTF8
+        "  Nombre en GA: $Sam@$DOMINIO_MFA" | Out-File $RUTA_CLAVES -Append -Encoding UTF8
+        "  Clave:        $clave"            | Out-File $RUTA_CLAVES -Append -Encoding UTF8
+        ""                                  | Out-File $RUTA_CLAVES -Append -Encoding UTF8
 
     } elseif ($LASTEXITCODE -eq 22) {
         Print-Warn "  $Sam ya registrado en multiOTP (se omite)"
@@ -82,59 +74,6 @@ function Instalar-MultiOTP {
 }
 
 
-function Habilitar-RDP {
-    Print-Info "Habilitando RDP..."
-
-    Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
-        -Name "fDenyTSConnections" -Value 0
-
-    # Abrir firewall
-    Enable-NetFirewallRule -DisplayGroup "Escritorio remoto" -ErrorAction SilentlyContinue
-
-    Print-Ok "RDP habilitado."
-}
-
-
-function Configurar-PermisosRDP {
-    Print-Info "Configurando permisos RDP para usuarios delegados..."
-
-    try {
-        Add-ADGroupMember -Identity "Usuarios de escritorio remoto" -Members $ADMINS_MFA -ErrorAction Stop
-        Print-Ok "Admins agregados al grupo Usuarios de escritorio remoto."
-    } catch {
-        Print-Warn "Algunos admins ya estaban en el grupo (se omite)."
-    }
-
-    foreach ($admin in $ADMINS_MFA) {
-        net localgroup "Usuarios de escritorio remoto" "EMPRESA\$admin" /add 2>$null | Out-Null
-    }
-
-    $secpolPath = "C:\secpol_mfa.txt"
-    $sdbPath    = "C:\secpol_mfa.sdb"
-
-    secedit /export /cfg $secpolPath | Out-Null
-
-    $content = Get-Content $secpolPath
-
-    # Verificar si ya tiene el SID agregado
-    if ($content -like "*S-1-5-32-555*") {
-        Print-Warn "Politica de inicio de sesion remoto ya configurada (se omite)."
-    } else {
-        $content = $content -replace `
-            "SeRemoteInteractiveLogonRight = \*S-1-5-32-544", `
-            "SeRemoteInteractiveLogonRight = *S-1-5-32-544,*S-1-5-32-555"
-
-        $content | Set-Content $secpolPath
-        secedit /configure /db $sdbPath /cfg $secpolPath /quiet | Out-Null
-        Print-Ok "Politica de inicio de sesion remoto configurada."
-    }
-
-    # Limpiar archivos temporales
-    Remove-Item $secpolPath -ErrorAction SilentlyContinue
-    Remove-Item $sdbPath    -ErrorAction SilentlyContinue
-}
-
-
 function Configurar-MultiOTP {
     Print-Info "Configurando multiOTP..."
 
@@ -165,12 +104,9 @@ function Registrar-Usuarios-MFA {
     "  Abre Google Authenticator -> + -> Ingresar clave -> Tipo: Basada en tiempo" | Out-File $RUTA_CLAVES -Append -Encoding UTF8
     "" | Out-File $RUTA_CLAVES -Append -Encoding UTF8
 
-    # Registrar 4 admins
     Write-Host ""
-    Print-Info "Registrando administradores..."
-    foreach ($sam in $ADMINS_MFA) {
-        Registrar-Usuario-Token -Sam $sam
-    }
+    Print-Info "Registrando Administrador..."
+    Registrar-Usuario-Token -Sam "Administrador"
 
     if (Test-Path $CSV_USUARIOS) {
         Write-Host ""
@@ -180,7 +116,7 @@ function Registrar-Usuarios-MFA {
             Registrar-Usuario-Token -Sam $u.Usuario
         }
     } else {
-        Print-Warn "CSV no encontrado, solo se registraron los admins."
+        Print-Warn "CSV no encontrado."
     }
 
     Write-Host ""
@@ -198,10 +134,6 @@ function Configurar-MFA {
     Write-Host ""
 
     Instalar-MultiOTP
-    Write-Host ""
-    Habilitar-RDP
-    Write-Host ""
-    Configurar-PermisosRDP
     Write-Host ""
     Configurar-MultiOTP
     Write-Host ""

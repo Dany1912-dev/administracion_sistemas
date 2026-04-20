@@ -2,18 +2,11 @@ $DOMINIO      = "empresa.local"
 $DC_PATH      = "DC=empresa,DC=local"
 $CSV_USUARIOS = "$PSScriptRoot\usuarios_p9.csv"
 
-$ADMINS = @(
-    [PSCustomObject]@{ Sam = "admin_identidad"; Nombre = "Admin"; Apellido = "Identidad"; Password = "Admin@Identidad123" },
-    [PSCustomObject]@{ Sam = "admin_storage";   Nombre = "Admin"; Apellido = "Storage";   Password = "Admin@Storage123"   },
-    [PSCustomObject]@{ Sam = "admin_politicas"; Nombre = "Admin"; Apellido = "Politicas"; Password = "Admin@Politicas123" },
-    [PSCustomObject]@{ Sam = "admin_auditoria"; Nombre = "Admin"; Apellido = "Auditoria"; Password = "Admin@Auditoria123" }
-)
 
 function Inicializar-Entorno {
     Write-Host ""
     Write-Host "========== Inicializar Entorno =========="
 
-    # Instalar AD
     $rol = Get-WindowsFeature -Name AD-Domain-Services
     if ($rol.InstallState -ne "Installed") {
         Print-Info "Instalando rol AD-Domain-Services..."
@@ -23,17 +16,15 @@ function Inicializar-Entorno {
         Print-Warn "AD-Domain-Services ya instalado (se omite)."
     }
 
-    # Instalar FSRM (necesario para Rol 2: admin_storage)
     $fsrm = Get-WindowsFeature -Name FS-Resource-Manager
     if ($fsrm.InstallState -ne "Installed") {
-        Print-Info "Instalando FSRM (File Server Resource Manager)..."
+        Print-Info "Instalando FSRM..."
         Install-WindowsFeature -Name FS-Resource-Manager -IncludeManagementTools
         Print-Ok "FSRM instalado."
     } else {
         Print-Warn "FSRM ya instalado (se omite)."
     }
 
-    # Promover a DC
     $domainRole = (Get-WmiObject Win32_ComputerSystem).DomainRole
     if ($domainRole -ge 4) {
         Print-Warn "Ya es Controlador de Dominio (se omite promocion)."
@@ -53,9 +44,10 @@ function Inicializar-Entorno {
     Print-Warn "El servidor se reiniciara. Ejecuta el script de nuevo y elige opcion 2."
 }
 
+
 function Crear-OUs {
     Print-Info "Verificando Unidades Organizativas..."
-    foreach ($ou in @("Admins", "Cuates", "NoCuates")) {
+    foreach ($ou in @("Cuates", "NoCuates")) {
         $existe = Get-ADOrganizationalUnit -Filter "Name -eq '$ou'" -ErrorAction SilentlyContinue
         if (-not $existe) {
             New-ADOrganizationalUnit -Name $ou -Path $DC_PATH
@@ -66,27 +58,6 @@ function Crear-OUs {
     }
 }
 
-function Crear-Admins {
-    Print-Info "Verificando usuarios administradores delegados..."
-    foreach ($admin in $ADMINS) {
-        $existe = Get-ADUser -Filter "SamAccountName -eq '$($admin.Sam)'" -ErrorAction SilentlyContinue
-        if (-not $existe) {
-            $pass = ConvertTo-SecureString $admin.Password -AsPlainText -Force
-            New-ADUser `
-                -Name              "$($admin.Nombre) $($admin.Apellido)" `
-                -GivenName         $admin.Nombre `
-                -Surname           $admin.Apellido `
-                -SamAccountName    $admin.Sam `
-                -UserPrincipalName "$($admin.Sam)@$DOMINIO" `
-                -AccountPassword   $pass `
-                -Path              "OU=Admins,$DC_PATH" `
-                -Enabled           $true
-            Print-Ok "Admin creado: $($admin.Sam) / $($admin.Password)"
-        } else {
-            Print-Warn "Admin ya existe: $($admin.Sam) (se omite)"
-        }
-    }
-}
 
 function Crear-UsuariosCSV {
     if (-not (Test-Path $CSV_USUARIOS)) {
@@ -107,9 +78,10 @@ function Crear-UsuariosCSV {
             $omitidos++
             continue
         }
+
         $existe = Get-ADUser -Filter "SamAccountName -eq '$($u.Usuario)'" -ErrorAction SilentlyContinue
         if (-not $existe) {
-            $pass   = ConvertTo-SecureString $u.Contrasena -AsPlainText -Force
+            $pass = ConvertTo-SecureString $u.Contrasena -AsPlainText -Force
             New-ADUser `
                 -Name              "$($u.Nombre) $($u.Apellido)" `
                 -GivenName         $u.Nombre `
@@ -119,7 +91,7 @@ function Crear-UsuariosCSV {
                 -AccountPassword   $pass `
                 -Path              "OU=$($u.OU),$DC_PATH" `
                 -Enabled           $true
-            Print-Ok "Creado: $($u.Usuario) -> $($u.OU)"
+            Print-Ok "Creado: $($u.Usuario) - $($u.OU)"
             $creados++
         } else {
             Print-Warn "Ya existe: $($u.Usuario) (se omite)"
@@ -131,6 +103,47 @@ function Crear-UsuariosCSV {
     Print-Info "Resumen: $creados creado(s), $omitidos omitido(s)."
 }
 
+
+function Habilitar-RDP-Usuarios {
+    Print-Info "Habilitando RDP para todos los usuarios..."
+
+    # Habilitar RDP en el servidor
+    Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+        -Name "fDenyTSConnections" -Value 0
+    Enable-NetFirewallRule -DisplayGroup "Escritorio remoto" -ErrorAction SilentlyContinue
+
+    # Agregar todos los usuarios al grupo de escritorio remoto
+    $usuarios = @()
+    $usuarios += Get-ADUser -Filter * -SearchBase "OU=Cuates,$DC_PATH" -ErrorAction SilentlyContinue
+    $usuarios += Get-ADUser -Filter * -SearchBase "OU=NoCuates,$DC_PATH" -ErrorAction SilentlyContinue
+
+    foreach ($u in $usuarios) {
+        try {
+            Add-ADGroupMember -Identity "Usuarios de escritorio remoto" -Members $u.SamAccountName -ErrorAction Stop
+        } catch {}
+        net localgroup "Usuarios de escritorio remoto" "EMPRESA\$($u.SamAccountName)" /add 2>$null | Out-Null
+    }
+
+    $secpolPath = "C:\secpol_rdp.txt"
+    $sdbPath    = "C:\secpol_rdp.sdb"
+    secedit /export /cfg $secpolPath | Out-Null
+
+    $content = Get-Content $secpolPath
+    if (-not ($content -like "*S-1-5-32-555*")) {
+        $content = $content -replace `
+            "SeRemoteInteractiveLogonRight = \*S-1-5-32-544", `
+            "SeRemoteInteractiveLogonRight = *S-1-5-32-544,*S-1-5-32-555"
+        $content | Set-Content $secpolPath
+        secedit /configure /db $sdbPath /cfg $secpolPath /quiet | Out-Null
+    }
+
+    Remove-Item $secpolPath -ErrorAction SilentlyContinue
+    Remove-Item $sdbPath    -ErrorAction SilentlyContinue
+
+    Print-Ok "RDP habilitado para todos los usuarios."
+}
+
+
 function Configurar-AD {
     Clear-Host
     Write-Host "========== Configuracion de Active Directory =========="
@@ -138,9 +151,9 @@ function Configurar-AD {
 
     Crear-OUs
     Write-Host ""
-    Crear-Admins
-    Write-Host ""
     Crear-UsuariosCSV
+    Write-Host ""
+    Habilitar-RDP-Usuarios
 
     Write-Host ""
     Print-Ok "Active Directory configurado correctamente."
