@@ -105,17 +105,18 @@ function Registrar-Usuarios-MFA {
     "" | Out-File $RUTA_CLAVES -Append -Encoding UTF8
 
     Write-Host ""
-    Print-Info "Registrando miembros del grupo Administradores..."
+    Print-Info "Registrando Administrador (builtin)..."
+    Registrar-Usuario-Token -Sam "Administrador"
 
-    $grupoAdmins = Get-ADGroup -Filter { SID -eq "S-1-5-32-544" } -ErrorAction SilentlyContinue
-    $admins = if ($grupoAdmins) { Get-ADGroupMember -Identity $grupoAdmins -Recursive -ErrorAction SilentlyContinue } else { $null }
-
-    if ($admins) {
-        foreach ($a in $admins) {
-            Registrar-Usuario-Token -Sam $a.SamAccountName
+    if (Test-Path $CSV_USUARIOS) {
+        Write-Host ""
+        Print-Info "Registrando usuarios del CSV..."
+        $usuarios = Import-Csv $CSV_USUARIOS
+        foreach ($u in $usuarios) {
+            Registrar-Usuario-Token -Sam $u.Usuario
         }
     } else {
-        Print-Warn "No se encontraron miembros en el grupo Administradores."
+        Print-Warn "CSV no encontrado: $CSV_USUARIOS"
     }
 
     Write-Host ""
