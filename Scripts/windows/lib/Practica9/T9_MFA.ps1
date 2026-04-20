@@ -105,19 +105,16 @@ function Registrar-Usuarios-MFA {
     "" | Out-File $RUTA_CLAVES -Append -Encoding UTF8
 
     Write-Host ""
-    Print-Info "Registrando Administrador (builtin)..."
-    Registrar-Usuario-Token -Sam "Administrador"
+    Print-Info "Registrando miembros del grupo Administradores..."
 
-    Write-Host ""
-    Print-Info "Registrando miembros de GrupoAdmins..."
-
-    $admins = Get-ADGroupMember -Identity "GrupoAdmins" -ErrorAction SilentlyContinue
+    $admins = Get-LocalGroupMember -Name "Administradores" -ErrorAction SilentlyContinue
     if ($admins) {
         foreach ($a in $admins) {
-            Registrar-Usuario-Token -Sam $a.SamAccountName
+            $sam = $a.Name -replace "^.*\\", ""
+            Registrar-Usuario-Token -Sam $sam
         }
     } else {
-        Print-Warn "GrupoAdmins vacio o no encontrado."
+        Print-Warn "No se encontraron miembros en el grupo Administradores."
     }
 
     Write-Host ""
