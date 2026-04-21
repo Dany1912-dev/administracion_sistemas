@@ -77,8 +77,19 @@ function Instalar-MultiOTP {
 function Configurar-MultiOTP {
     Print-Info "Configurando multiOTP..."
 
+    # Generar y guardar el server-secret antes de verificar multiOTP
+    $bytes  = New-Object byte[] 20
+    [Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($bytes)
+    $secret = [BitConverter]::ToString($bytes).Replace("-", "").ToLower()
+
+    $secret | Out-File "$env:USERPROFILE\multiotp_secret.txt" -Encoding UTF8
+    Print-Ok "Server-secret guardado en: $env:USERPROFILE\multiotp_secret.txt"
+    Print-Info "Copia ese archivo al cliente antes de ejecutar el script cliente."
+
     if (-not (Test-Path $MULTIOTP_EXE)) {
-        Print-Err "multiotp.exe no encontrado. Instala primero multiOTP."
+        Print-Err "multiotp.exe no encontrado en: $MULTIOTP_EXE"
+        Print-Warn "Verifica que la instalacion del MSI haya sido exitosa."
+        Print-Warn "El secret.txt ya fue guardado y puede copiarse al cliente."
         return
     }
 
@@ -92,17 +103,8 @@ function Configurar-MultiOTP {
     Set-ItemProperty -Path $MULTIOTP_REG -Name "multiOTPUPNFormat" -Value 1
     Print-Ok "Credential Provider configurado."
 
-    # Generar server-secret aleatorio
-    $bytes  = New-Object byte[] 20
-    [Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($bytes)
-    $secret = [BitConverter]::ToString($bytes).Replace("-", "").ToLower()
-
     & $MULTIOTP_EXE -config server-secret=$secret | Out-Null
-    Print-Ok "Server-secret configurado."
-
-    $secret | Out-File "$env:USERPROFILE\multiotp_secret.txt" -Encoding UTF8
-    Print-Ok "Secret guardado en: $env:USERPROFILE\multiotp_secret.txt"
-    Print-Info "Copia ese archivo al cliente antes de ejecutar el script cliente."
+    Print-Ok "Server-secret configurado en multiOTP."
 
     # Regla de firewall
     $regla = Get-NetFirewallRule -DisplayName "multiOTP" -ErrorAction SilentlyContinue
