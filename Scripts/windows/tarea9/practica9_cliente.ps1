@@ -113,10 +113,10 @@ function Mostrar-Instrucciones {
     Write-Host "  - multiotp_secret.txt   (generado por el script del servidor, opcion 5)"
     Write-Host ""
     Write-Host "Ubicacion en el servidor de los instaladores:"
-    Write-Host "  \\<IP_SERVIDOR>\c$\...\Scripts\windows\lib\Practica9\"
+    Write-Host '  \\<IP_SERVIDOR>\c$\...\Scripts\windows\lib\Practica9\'
     Write-Host ""
     Write-Host "Ubicacion en el servidor de multiotp_secret.txt:"
-    Write-Host "  \\<IP_SERVIDOR>\c$\Users\Administrador\multiotp_secret.txt"
+    Write-Host '  \\<IP_SERVIDOR>\c$\Users\Administrador\multiotp_secret.txt'
     Write-Host ""
     Write-Host "ORDEN de ejecucion:"
     Write-Host "  1) Instalar multiOTP"
@@ -127,7 +127,7 @@ function Mostrar-Instrucciones {
     Write-Host "Al iniciar sesion con EMPRESA\usuario se pedira contrasena"
     Write-Host "y luego el codigo de Google Authenticator."
     Write-Host ""
-    Write-Host "El cliente NO almacena secrets — la validacion ocurre en el servidor."
+    Write-Host "El cliente NO almacena secrets - la validacion ocurre en el servidor."
     Write-Host ""
 }
 
