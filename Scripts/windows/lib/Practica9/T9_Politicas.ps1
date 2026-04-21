@@ -160,8 +160,6 @@ function Configurar-Politicas {
     Configurar-FGPP
     Write-Host ""
     Configurar-Auditoria
-    Write-Host ""
-    Generar-Reporte
 
     Write-Host ""
     Print-Ok "Politicas y auditoria configuradas correctamente."

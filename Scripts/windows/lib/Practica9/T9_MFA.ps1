@@ -91,6 +91,27 @@ function Configurar-MultiOTP {
     Set-ItemProperty -Path $MULTIOTP_REG -Name "two_step_hide_otp" -Value 1
     Set-ItemProperty -Path $MULTIOTP_REG -Name "multiOTPUPNFormat" -Value 1
     Print-Ok "Credential Provider configurado."
+
+    # Generar server-secret aleatorio
+    $bytes  = New-Object byte[] 20
+    [Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($bytes)
+    $secret = [BitConverter]::ToString($bytes).Replace("-", "").ToLower()
+
+    & $MULTIOTP_EXE -config server-secret=$secret | Out-Null
+    Print-Ok "Server-secret configurado."
+
+    $secret | Out-File "$env:USERPROFILE\multiotp_secret.txt" -Encoding UTF8
+    Print-Ok "Secret guardado en: $env:USERPROFILE\multiotp_secret.txt"
+    Print-Info "Copia ese archivo al cliente antes de ejecutar el script cliente."
+
+    # Regla de firewall
+    $regla = Get-NetFirewallRule -DisplayName "multiOTP" -ErrorAction SilentlyContinue
+    if (-not $regla) {
+        New-NetFirewallRule -DisplayName "multiOTP" -Direction Inbound -Protocol TCP -LocalPort 8112 -Action Allow | Out-Null
+        Print-Ok "Regla de firewall creada (TCP 8112)."
+    } else {
+        Print-Warn "Regla de firewall ya existe (se omite)."
+    }
 }
 
 

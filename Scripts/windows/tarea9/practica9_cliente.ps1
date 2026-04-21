@@ -5,10 +5,11 @@ function Print-Info { param($msg) Write-Host "[INFO] $msg" -ForegroundColor Cyan
 function Print-Warn { param($msg) Write-Host "[WARN] $msg" -ForegroundColor Yellow }
 function Print-Err  { param($msg) Write-Host "[ERR]  $msg" -ForegroundColor Red    }
 
-$MULTIOTP_EXE = "C:\Program Files\multiOTP\multiotp.exe"
-$MULTIOTP_MSI = "$PSScriptRoot\multiOTP.msi"
-$VCREDIST_EXE = "$PSScriptRoot\VC_redist.x64.exe"
-$MULTIOTP_REG = "Registry::HKEY_CLASSES_ROOT\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}"
+$MULTIOTP_EXE  = "C:\Program Files\multiOTP\multiotp.exe"
+$MULTIOTP_MSI  = "$PSScriptRoot\..\lib\Practica9\multiOTP.msi"
+$VCREDIST_EXE  = "$PSScriptRoot\..\lib\Practica9\VC_redist.x64.exe"
+$MULTIOTP_REG  = "Registry::HKEY_CLASSES_ROOT\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}"
+$RUTA_SECRET   = "$PSScriptRoot\multiotp_secret.txt"
 
 
 function Instalar-MultiOTP {
@@ -82,10 +83,20 @@ function Configurar-Servidor {
         return
     }
 
-    & $MULTIOTP_EXE -config server-url="http://$ip" | Out-Null
-    & $MULTIOTP_EXE -config server-timeout=10       | Out-Null
-    & $MULTIOTP_EXE -config server-cache-level=0    | Out-Null
-    Print-Ok "Cliente apuntando al servidor: http://$ip"
+    if (-not (Test-Path $RUTA_SECRET)) {
+        Print-Err "No se encontro: $RUTA_SECRET"
+        Print-Info "Copia multiotp_secret.txt del servidor ($env:USERPROFILE\multiotp_secret.txt) a este directorio."
+        return
+    }
+
+    $secret = (Get-Content $RUTA_SECRET -Raw).Trim()
+
+    & $MULTIOTP_EXE -config server-url="http://$ip`:8112" | Out-Null
+    & $MULTIOTP_EXE -config server-secret=$secret         | Out-Null
+    & $MULTIOTP_EXE -config server-timeout=10             | Out-Null
+    & $MULTIOTP_EXE -config server-cache-level=0          | Out-Null
+    Print-Ok "Cliente apuntando al servidor: http://$ip`:8112"
+    Print-Ok "Server-secret configurado."
     Print-Info "La validacion del OTP se realiza en el servidor, no localmente."
 }
 
@@ -97,11 +108,15 @@ function Mostrar-Instrucciones {
     Write-Host "ANTES de ejecutar este script necesitas tener en este mismo"
     Write-Host "directorio los siguientes archivos del servidor:"
     Write-Host ""
-    Write-Host "  - multiOTP.msi       (instalador del Credential Provider)"
-    Write-Host "  - VC_redist.x64.exe  (dependencia de Visual C++)"
+    Write-Host "  - multiOTP.msi          (instalador del Credential Provider)"
+    Write-Host "  - VC_redist.x64.exe     (dependencia de Visual C++)"
+    Write-Host "  - multiotp_secret.txt   (generado por el script del servidor, opcion 5)"
     Write-Host ""
-    Write-Host "Ubicacion en el servidor:"
+    Write-Host "Ubicacion en el servidor de los instaladores:"
     Write-Host "  \\<IP_SERVIDOR>\c$\...\Scripts\windows\lib\Practica9\"
+    Write-Host ""
+    Write-Host "Ubicacion en el servidor de multiotp_secret.txt:"
+    Write-Host "  \\<IP_SERVIDOR>\c$\Users\Administrador\multiotp_secret.txt"
     Write-Host ""
     Write-Host "ORDEN de ejecucion:"
     Write-Host "  1) Instalar multiOTP"
