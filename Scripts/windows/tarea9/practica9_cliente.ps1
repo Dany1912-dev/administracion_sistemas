@@ -126,19 +126,20 @@ function Importar-Tokens-Servidor {
         }
 
         if ($linea -match '^\s+Clave:\s+(.+)$' -and $usuario) {
-            $clave = $matches[1].Trim()
+            $clave        = $matches[1].Trim()
+            $usuarioCp    = "$usuario@EMPRESA"
 
-            & $MULTIOTP_EXE -createga $usuario $clave | Out-Null
+            & $MULTIOTP_EXE -createga $usuarioCp $clave | Out-Null
 
             if ($LASTEXITCODE -eq 11) {
-                & $MULTIOTP_EXE -set $usuario prefix-pin=0 | Out-Null
-                Print-Ok "  $usuario - token registrado"
+                & $MULTIOTP_EXE -set $usuarioCp prefix-pin=0 | Out-Null
+                Print-Ok "  $usuarioCp - token registrado"
                 $registrados++
             } elseif ($LASTEXITCODE -eq 22) {
-                Print-Warn "  $usuario - ya registrado (se omite)"
+                Print-Warn "  $usuarioCp - ya registrado (se omite)"
                 $omitidos++
             } else {
-                Print-Err "  $usuario - error (codigo: $LASTEXITCODE)"
+                Print-Err "  $usuarioCp - error (codigo: $LASTEXITCODE)"
             }
 
             $usuario = $null
