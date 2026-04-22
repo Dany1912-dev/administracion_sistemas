@@ -9,7 +9,6 @@ $MULTIOTP_EXE  = "C:\Program Files\multiOTP\multiotp.exe"
 $MULTIOTP_MSI  = "$PSScriptRoot\..\lib\Practica9\multiOTP.msi"
 $VCREDIST_EXE  = "$PSScriptRoot\..\lib\Practica9\VC_redist.x64.exe"
 $MULTIOTP_REG  = "Registry::HKEY_CLASSES_ROOT\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}"
-$RUTA_SECRET   = "$PSScriptRoot\multiotp_secret.txt"
 
 
 function Instalar-MultiOTP {
@@ -61,7 +60,7 @@ function Configurar-CredentialProvider {
         Set-ItemProperty -Path $MULTIOTP_REG -Name "cpus_logon"        -Value "0e" -ErrorAction Stop
         Set-ItemProperty -Path $MULTIOTP_REG -Name "cpus_unlock"       -Value "0e" -ErrorAction Stop
         Set-ItemProperty -Path $MULTIOTP_REG -Name "two_step_hide_otp" -Value 1    -ErrorAction Stop
-        Set-ItemProperty -Path $MULTIOTP_REG -Name "multiOTPUPNFormat" -Value 1    -ErrorAction Stop
+        Set-ItemProperty -Path $MULTIOTP_REG -Name "multiOTPUPNFormat" -Value 0    -ErrorAction Stop
         Print-Ok "Credential Provider configurado en registro."
     } catch {
         Print-Err "Error al escribir en registro: $_"
@@ -70,34 +69,73 @@ function Configurar-CredentialProvider {
 }
 
 
-function Configurar-Servidor {
+function Importar-Tokens-Servidor {
     if (-not (Test-Path $MULTIOTP_EXE)) {
         Print-Err "multiotp.exe no encontrado. Ejecuta primero la opcion 1."
         return
     }
 
-    $ip = Read-Host "IP del servidor multiOTP (Windows Server)"
+    $ip = Read-Host "IP del servidor (Windows Server)"
 
     if ($ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$') {
         Print-Err "IP no valida: $ip"
         return
     }
 
-    if (-not (Test-Path $RUTA_SECRET)) {
-        Print-Err "No se encontro: $RUTA_SECRET"
-        Print-Info "Copia multiotp_secret.txt del servidor ($env:USERPROFILE\multiotp_secret.txt) a este directorio."
+    $rutaRemota = "\\$ip\c$\Users\dleyva\claves_mfa.txt"
+
+    Print-Info "Conectando a: $rutaRemota"
+
+    if (-not (Test-Path $rutaRemota)) {
+        Print-Err "No se encontro el archivo en: $rutaRemota"
+        Print-Info "Verifica que:"
+        Print-Info "  - La IP sea correcta"
+        Print-Info "  - La opcion 5 del servidor se haya ejecutado"
+        Print-Info "  - El recurso compartido c$ este accesible"
         return
     }
 
-    $secret = (Get-Content $RUTA_SECRET -Raw).Trim()
+    Print-Info "Desactivando modo servidor (validacion local)..."
+    & $MULTIOTP_EXE -config server-url="" | Out-Null
+    Print-Ok "Modo local activado."
 
-    & $MULTIOTP_EXE -config server-url="http://$ip`:8112" | Out-Null
-    & $MULTIOTP_EXE -config server-secret=$secret         | Out-Null
-    & $MULTIOTP_EXE -config server-timeout=10             | Out-Null
-    & $MULTIOTP_EXE -config server-cache-level=0          | Out-Null
-    Print-Ok "Cliente apuntando al servidor: http://$ip`:8112"
-    Print-Ok "Server-secret configurado."
-    Print-Info "La validacion del OTP se realiza en el servidor, no localmente."
+    $lineas   = Get-Content $rutaRemota
+    $usuario  = $null
+    $registrados = 0
+    $omitidos    = 0
+
+    Write-Host ""
+    Print-Info "Registrando tokens..."
+    Write-Host ""
+
+    foreach ($linea in $lineas) {
+        if ($linea -match '^Usuario:\s+(.+)$') {
+            $usuario = $matches[1].Trim()
+        }
+
+        if ($linea -match '^\s+Clave:\s+(.+)$' -and $usuario) {
+            $clave = $matches[1].Trim()
+
+            & $MULTIOTP_EXE -createga $usuario $clave | Out-Null
+
+            if ($LASTEXITCODE -eq 11) {
+                & $MULTIOTP_EXE -set $usuario prefix-pin=0 | Out-Null
+                Print-Ok "  $usuario - token registrado"
+                $registrados++
+            } elseif ($LASTEXITCODE -eq 22) {
+                Print-Warn "  $usuario - ya registrado (se omite)"
+                $omitidos++
+            } else {
+                Print-Err "  $usuario - error (codigo: $LASTEXITCODE)"
+            }
+
+            $usuario = $null
+        }
+    }
+
+    Write-Host ""
+    Print-Info "Resumen: $registrados registrado(s), $omitidos omitido(s)."
+    Print-Warn "Reinicia el cliente para que los cambios apliquen."
 }
 
 
@@ -105,29 +143,18 @@ function Mostrar-Instrucciones {
     Clear-Host
     Write-Host "========== Instrucciones de uso ==========" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "ANTES de ejecutar este script necesitas tener en este mismo"
-    Write-Host "directorio los siguientes archivos del servidor:"
-    Write-Host ""
-    Write-Host "  - multiOTP.msi          (instalador del Credential Provider)"
-    Write-Host "  - VC_redist.x64.exe     (dependencia de Visual C++)"
-    Write-Host "  - multiotp_secret.txt   (generado por el script del servidor, opcion 5)"
-    Write-Host ""
-    Write-Host "Ubicacion en el servidor de los instaladores:"
-    Write-Host '  \\<IP_SERVIDOR>\c$\...\Scripts\windows\lib\Practica9\'
-    Write-Host ""
-    Write-Host "Ubicacion en el servidor de multiotp_secret.txt:"
-    Write-Host '  \\<IP_SERVIDOR>\c$\Users\Administrador\multiotp_secret.txt'
-    Write-Host ""
     Write-Host "ORDEN de ejecucion:"
-    Write-Host "  1) Instalar multiOTP"
+    Write-Host "  1) Instalar multiOTP Credential Provider"
     Write-Host "  2) Configurar Credential Provider"
-    Write-Host "  3) Apuntar al servidor"
+    Write-Host "  3) Importar tokens del servidor (necesitas la IP del servidor)"
     Write-Host "  4) Reiniciar"
     Write-Host ""
-    Write-Host "Al iniciar sesion con EMPRESA\usuario se pedira contrasena"
-    Write-Host "y luego el codigo de Google Authenticator."
+    Write-Host "La opcion 3 se conecta a \\<IP>\c$\Users\dleyva\claves_mfa.txt"
+    Write-Host "y registra todos los tokens localmente en este equipo."
+    Write-Host "La validacion del OTP ocurre de forma local, sin depender del servidor."
     Write-Host ""
-    Write-Host "El cliente NO almacena secrets - la validacion ocurre en el servidor."
+    Write-Host "Al iniciar sesion pon el usuario como: EMPRESA\dleyva"
+    Write-Host "Se pedira primero la contrasena y luego el codigo de Google Authenticator."
     Write-Host ""
 }
 
@@ -139,7 +166,7 @@ function Mostrar-Menu {
         Write-Host ""
         Write-Host "  [1] Instalar multiOTP Credential Provider"
         Write-Host "  [2] Configurar Credential Provider"
-        Write-Host "  [3] Apuntar al servidor multiOTP"
+        Write-Host "  [3] Importar tokens del servidor"
         Write-Host "  [4] Ver instrucciones"
         Write-Host "  [5] Salir"
         Write-Host ""
@@ -149,7 +176,7 @@ function Mostrar-Menu {
         switch ($op) {
             "1" { Clear-Host; Instalar-MultiOTP;             Read-Host "`nEnter para continuar" }
             "2" { Clear-Host; Configurar-CredentialProvider; Read-Host "`nEnter para continuar" }
-            "3" { Clear-Host; Configurar-Servidor;           Read-Host "`nEnter para continuar" }
+            "3" { Clear-Host; Importar-Tokens-Servidor;      Read-Host "`nEnter para continuar" }
             "4" { Mostrar-Instrucciones;                     Read-Host "`nEnter para continuar" }
             "5" { Clear-Host; Write-Host "Saliendo..."; return }
             default { Print-Warn "Opcion no valida."; Start-Sleep -Seconds 1 }
