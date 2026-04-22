@@ -82,16 +82,28 @@ function Importar-Tokens-Servidor {
         return
     }
 
-    $rutaRemota = "\\$ip\c$\Users\dleyva\claves_mfa.txt"
+    Print-Info "Introduce las credenciales de administrador del servidor."
+    $usuario = Read-Host "Usuario (ej: EMPRESA\dleyva)"
+    $passseg = Read-Host "Contrasena" -AsSecureString
+    $passTxt = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+                   [Runtime.InteropServices.Marshal]::SecureStringToBSTR($passseg))
 
-    Print-Info "Conectando a: $rutaRemota"
+    Print-Info "Estableciendo conexion con el servidor..."
+    net use "\\$ip\c$" $passTxt /user:$usuario 2>&1 | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        Print-Err "No se pudo conectar a \\$ip\c$"
+        Print-Info "Verifica la IP y las credenciales."
+        return
+    }
+    Print-Ok "Conexion establecida."
+
+    $rutaRemota = "\\$ip\c$\Users\dleyva\claves_mfa.txt"
 
     if (-not (Test-Path $rutaRemota)) {
         Print-Err "No se encontro el archivo en: $rutaRemota"
-        Print-Info "Verifica que:"
-        Print-Info "  - La IP sea correcta"
-        Print-Info "  - La opcion 5 del servidor se haya ejecutado"
-        Print-Info "  - El recurso compartido c$ este accesible"
+        Print-Info "Verifica que la opcion 5 del servidor se haya ejecutado."
+        net use "\\$ip\c$" /delete 2>&1 | Out-Null
         return
     }
 
@@ -132,6 +144,8 @@ function Importar-Tokens-Servidor {
             $usuario = $null
         }
     }
+
+    net use "\\$ip\c$" /delete 2>&1 | Out-Null
 
     Write-Host ""
     Print-Info "Resumen: $registrados registrado(s), $omitidos omitido(s)."
