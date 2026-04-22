@@ -144,11 +144,34 @@ function Habilitar-RDP-Usuarios {
 }
 
 
+function Crear-AdminDleyva {
+    Print-Info "Verificando usuario administrador dleyva..."
+
+    $existe = Get-ADUser -Filter "SamAccountName -eq 'dleyva'" -ErrorAction SilentlyContinue
+    if ($existe) {
+        Print-Warn "dleyva ya existe en AD (se omite)"
+        return
+    }
+
+    $pass = Read-Host "Contrasena para dleyva" -AsSecureString
+    New-ADUser `
+        -Name              "dleyva" `
+        -SamAccountName    "dleyva" `
+        -UserPrincipalName "dleyva@$DOMINIO" `
+        -AccountPassword   $pass `
+        -Enabled           $true
+    Add-ADGroupMember -Identity "Domain Admins" -Members "dleyva"
+    Print-Ok "dleyva creado y agregado a Domain Admins."
+}
+
+
 function Configurar-AD {
     Clear-Host
     Write-Host "========== Configuracion de Active Directory =========="
     Write-Host ""
 
+    Crear-AdminDleyva
+    Write-Host ""
     Crear-OUs
     Write-Host ""
     Crear-UsuariosCSV

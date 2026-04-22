@@ -128,8 +128,8 @@ function Registrar-Usuarios-MFA {
     "" | Out-File $RUTA_CLAVES -Append -Encoding UTF8
 
     Write-Host ""
-    Print-Info "Registrando Administrador (builtin)..."
-    Registrar-Usuario-Token -Sam "Administrador"
+    Print-Info "Registrando dleyva..."
+    Registrar-Usuario-Token -Sam "dleyva"
 
     if (Test-Path $CSV_USUARIOS) {
         Write-Host ""
