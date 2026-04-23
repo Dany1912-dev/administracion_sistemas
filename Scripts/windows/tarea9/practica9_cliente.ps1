@@ -93,6 +93,19 @@ function Unir-Dominio {
 }
 
 
+function Instalar-RSAT {
+    Print-Info "Verificando instalacion de RSAT (herramientas AD)..."
+    $rsat = Get-WindowsCapability -Online -Name Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0 -ErrorAction SilentlyContinue
+    if ($rsat -and $rsat.State -eq "Installed") {
+        Print-Warn "RSAT ya instalado (se omite)."
+        return
+    }
+    Print-Info "Instalando RSAT..."
+    Add-WindowsCapability -Online -Name Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0 | Out-Null
+    Print-Ok "RSAT instalado."
+}
+
+
 function Instalar-MultiOTP {
     Print-Info "Verificando instalacion de multiOTP..."
 
@@ -276,7 +289,7 @@ function Mostrar-Menu {
 
         switch ($op) {
             "1" { Clear-Host; Unir-Dominio;                  Read-Host "`nEnter para continuar" }
-            "2" { Clear-Host; Instalar-MultiOTP;             Read-Host "`nEnter para continuar" }
+            "2" { Clear-Host; Instalar-RSAT; Write-Host ""; Instalar-MultiOTP; Read-Host "`nEnter para continuar" }
             "3" { Clear-Host; Configurar-CredentialProvider; Read-Host "`nEnter para continuar" }
             "4" { Clear-Host; Importar-Tokens-Servidor;      Read-Host "`nEnter para continuar" }
             "5" { Mostrar-Instrucciones;                     Read-Host "`nEnter para continuar" }

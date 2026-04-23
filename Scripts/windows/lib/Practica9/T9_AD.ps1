@@ -148,20 +148,27 @@ function Crear-AdminDleyva {
     Print-Info "Verificando usuario administrador dleyva..."
 
     $existe = Get-ADUser -Filter "SamAccountName -eq 'dleyva'" -ErrorAction SilentlyContinue
-    if ($existe) {
-        Print-Warn "dleyva ya existe en AD (se omite)"
-        return
+    if (-not $existe) {
+        $pass = Read-Host "Contrasena para dleyva" -AsSecureString
+        New-ADUser `
+            -Name              "dleyva" `
+            -SamAccountName    "dleyva" `
+            -UserPrincipalName "dleyva@$DOMINIO" `
+            -AccountPassword   $pass `
+            -Enabled           $true
+        Print-Ok "dleyva creado."
+    } else {
+        Print-Warn "dleyva ya existe en AD."
     }
 
-    $pass = Read-Host "Contrasena para dleyva" -AsSecureString
-    New-ADUser `
-        -Name              "dleyva" `
-        -SamAccountName    "dleyva" `
-        -UserPrincipalName "dleyva@$DOMINIO" `
-        -AccountPassword   $pass `
-        -Enabled           $true
-    Add-ADGroupMember -Identity "Domain Admins" -Members "dleyva"
-    Print-Ok "dleyva creado y agregado a Domain Admins."
+    $enDomainAdmins = Get-ADGroupMember "Domain Admins" -ErrorAction SilentlyContinue |
+                      Where-Object { $_.SamAccountName -eq "dleyva" }
+    if (-not $enDomainAdmins) {
+        Add-ADGroupMember -Identity "Domain Admins" -Members "dleyva"
+        Print-Ok "dleyva agregado a Domain Admins."
+    } else {
+        Print-Warn "dleyva ya es miembro de Domain Admins (se omite)."
+    }
 }
 
 
