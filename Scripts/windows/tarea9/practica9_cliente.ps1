@@ -5,10 +5,92 @@ function Print-Info { param($msg) Write-Host "[INFO] $msg" -ForegroundColor Cyan
 function Print-Warn { param($msg) Write-Host "[WARN] $msg" -ForegroundColor Yellow }
 function Print-Err  { param($msg) Write-Host "[ERR]  $msg" -ForegroundColor Red    }
 
+$DOMINIO       = "empresa.local"
+$IP_SERVIDOR   = "192.168.10.150"
 $MULTIOTP_EXE  = "C:\Program Files\multiOTP\multiotp.exe"
 $MULTIOTP_MSI  = "$PSScriptRoot\..\lib\Practica9\multiOTP.msi"
 $VCREDIST_EXE  = "$PSScriptRoot\..\lib\Practica9\VC_redist.x64.exe"
 $MULTIOTP_REG  = "Registry::HKEY_CLASSES_ROOT\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}"
+
+
+function Unir-Dominio {
+    Print-Info "Verificando estado del dominio..."
+
+    $equipo = Get-WmiObject Win32_ComputerSystem
+    if ($equipo.PartOfDomain -and $equipo.Domain -eq $DOMINIO) {
+        Print-Warn "Este equipo ya esta unido a $DOMINIO (se omite)."
+        return
+    }
+
+    Write-Host ""
+    Print-Info "Adaptadores de red disponibles:"
+    $adaptadores = Get-NetAdapter | Where-Object { $_.Status -eq "Up" }
+    for ($i = 0; $i -lt $adaptadores.Count; $i++) {
+        $ip = (Get-NetIPAddress -InterfaceIndex $adaptadores[$i].ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
+        Write-Host "  [$($i+1)] $($adaptadores[$i].Name)  -  IP actual: $ip"
+    }
+
+    $defaultIdx = $null
+    for ($i = 0; $i -lt $adaptadores.Count; $i++) {
+        if ($adaptadores[$i].Name -eq "Ethernet 2") { $defaultIdx = $i + 1; break }
+    }
+
+    $hint = if ($defaultIdx) { " (Enter para Ethernet 2)" } else { "" }
+    $sel  = Read-Host "Selecciona el adaptador de red interna (red_sistemas)$hint"
+
+    if ([string]::IsNullOrWhiteSpace($sel) -and $defaultIdx) {
+        $sel = "$defaultIdx"
+    }
+
+    if ($sel -notmatch '^\d+$' -or [int]$sel -lt 1 -or [int]$sel -gt $adaptadores.Count) {
+        Print-Err "Seleccion invalida."
+        return
+    }
+
+    $adaptador = $adaptadores[[int]$sel - 1]
+    Print-Ok "Adaptador seleccionado: $($adaptador.Name)"
+
+    Write-Host ""
+    $ipCliente = Read-Host "IP estatica para este cliente (Enter para usar 192.168.10.200)"
+    if ([string]::IsNullOrWhiteSpace($ipCliente)) { $ipCliente = "192.168.10.200" }
+
+    Print-Info "Configurando IP estatica $ipCliente en $($adaptador.Name)..."
+    $ipActual = Get-NetIPAddress -InterfaceIndex $adaptador.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
+    if ($ipActual) {
+        Remove-NetIPAddress -InterfaceIndex $adaptador.ifIndex -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    Remove-NetRoute -InterfaceIndex $adaptador.ifIndex -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue
+    New-NetIPAddress -InterfaceIndex $adaptador.ifIndex -AddressFamily IPv4 `
+        -IPAddress $ipCliente -PrefixLength 24 -DefaultGateway "192.168.10.1" | Out-Null
+    Set-DnsClientServerAddress -InterfaceIndex $adaptador.ifIndex -ServerAddresses $IP_SERVIDOR
+    Print-Ok "IP: $ipCliente  |  Gateway: 192.168.10.1  |  DNS: $IP_SERVIDOR"
+
+    Write-Host ""
+    Print-Info "Probando conectividad con el servidor..."
+    if (Test-Connection -ComputerName $IP_SERVIDOR -Count 1 -Quiet) {
+        Print-Ok "Servidor accesible."
+    } else {
+        Print-Err "No se puede alcanzar el servidor en $IP_SERVIDOR."
+        Print-Info "Verifica que el servidor este encendido y en la misma red interna."
+        return
+    }
+
+    Write-Host ""
+    Print-Info "Introduce las credenciales de administrador del dominio."
+    $credencial = Get-Credential -Message "Credenciales para unirse a $DOMINIO (ej: EMPRESA\dleyva)"
+
+    Print-Info "Uniendo equipo al dominio $DOMINIO..."
+    try {
+        Add-Computer -DomainName $DOMINIO -Credential $credencial -Force -ErrorAction Stop
+        Print-Ok "Equipo unido correctamente a $DOMINIO."
+        Print-Warn "El equipo se reiniciara para aplicar los cambios."
+        Read-Host "`nEnter para reiniciar"
+        Restart-Computer -Force
+    } catch {
+        Print-Err "No se pudo unir al dominio: $_"
+        Print-Info "Verifica que el servidor este encendido y accesible en $IP_SERVIDOR."
+    }
+}
 
 
 function Instalar-MultiOTP {
@@ -25,7 +107,7 @@ function Instalar-MultiOTP {
 
     if (-not (Test-Path $VCREDIST_EXE)) {
         Print-Err "No se encontro: $VCREDIST_EXE"
-        Print-Info "Copia VC_redist.x64.exe y multiOTP.msi al mismo directorio que este script."
+        Print-Info "Verifica que VC_redist.x64.exe y multiOTP.msi esten en Scripts\windows\lib\Practica9\"
         return
     }
 
@@ -48,7 +130,7 @@ function Configurar-CredentialProvider {
     Print-Info "Configurando Credential Provider..."
 
     if (-not (Test-Path $MULTIOTP_EXE)) {
-        Print-Err "multiotp.exe no encontrado. Ejecuta primero la opcion 1."
+        Print-Err "multiotp.exe no encontrado. Ejecuta primero la opcion 2."
         return
     }
 
@@ -60,7 +142,7 @@ function Configurar-CredentialProvider {
         Set-ItemProperty -Path $MULTIOTP_REG -Name "cpus_logon"        -Value "0e" -ErrorAction Stop
         Set-ItemProperty -Path $MULTIOTP_REG -Name "cpus_unlock"       -Value "0e" -ErrorAction Stop
         Set-ItemProperty -Path $MULTIOTP_REG -Name "two_step_hide_otp" -Value 1    -ErrorAction Stop
-        Set-ItemProperty -Path $MULTIOTP_REG -Name "multiOTPUPNFormat" -Value 1    -ErrorAction Stop
+        Set-ItemProperty -Path $MULTIOTP_REG -Name "multiOTPUPNFormat" -Value 0    -ErrorAction Stop
         Print-Ok "Credential Provider configurado en registro."
     } catch {
         Print-Err "Error al escribir en registro: $_"
@@ -71,11 +153,12 @@ function Configurar-CredentialProvider {
 
 function Importar-Tokens-Servidor {
     if (-not (Test-Path $MULTIOTP_EXE)) {
-        Print-Err "multiotp.exe no encontrado. Ejecuta primero la opcion 1."
+        Print-Err "multiotp.exe no encontrado. Ejecuta primero la opcion 2."
         return
     }
 
-    $ip = Read-Host "IP del servidor (Windows Server)"
+    $ip = Read-Host "IP del servidor (Enter para usar $IP_SERVIDOR)"
+    if ([string]::IsNullOrWhiteSpace($ip)) { $ip = $IP_SERVIDOR }
 
     if ($ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$') {
         Print-Err "IP no valida: $ip"
@@ -83,13 +166,13 @@ function Importar-Tokens-Servidor {
     }
 
     Print-Info "Introduce las credenciales de administrador del servidor."
-    $usuario = Read-Host "Usuario (ej: EMPRESA\dleyva)"
-    $passseg = Read-Host "Contrasena" -AsSecureString
-    $passTxt = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-                   [Runtime.InteropServices.Marshal]::SecureStringToBSTR($passseg))
+    $usuarioRed = Read-Host "Usuario (ej: EMPRESA\dleyva)"
+    $passseg    = Read-Host "Contrasena" -AsSecureString
+    $passTxt    = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+                      [Runtime.InteropServices.Marshal]::SecureStringToBSTR($passseg))
 
     Print-Info "Estableciendo conexion con el servidor..."
-    net use "\\$ip\c$" $passTxt /user:$usuario 2>&1 | Out-Null
+    net use "\\$ip\c$" $passTxt /user:$usuarioRed 2>&1 | Out-Null
 
     if ($LASTEXITCODE -ne 0) {
         Print-Err "No se pudo conectar a \\$ip\c$"
@@ -107,12 +190,11 @@ function Importar-Tokens-Servidor {
         return
     }
 
-    Print-Info "Desactivando modo servidor (validacion local)..."
     & $MULTIOTP_EXE -config server-url="" | Out-Null
-    Print-Ok "Modo local activado."
+    Print-Ok "Modo local activado (sin servidor remoto)."
 
-    $lineas   = Get-Content $rutaRemota
-    $usuario  = $null
+    $lineas      = Get-Content $rutaRemota
+    $usuarioMFA  = $null
     $registrados = 0
     $omitidos    = 0
 
@@ -122,27 +204,26 @@ function Importar-Tokens-Servidor {
 
     foreach ($linea in $lineas) {
         if ($linea -match '^Usuario:\s+(.+)$') {
-            $usuario = $matches[1].Trim()
+            $usuarioMFA = $matches[1].Trim()
         }
 
-        if ($linea -match '^\s+Clave:\s+(.+)$' -and $usuario) {
-            $clave        = $matches[1].Trim()
-            $usuarioCp    = "$usuario@EMPRESA"
+        if ($linea -match '^\s+Clave:\s+(.+)$' -and $usuarioMFA) {
+            $clave = $matches[1].Trim()
 
-            & $MULTIOTP_EXE -createga $usuarioCp $clave | Out-Null
+            & $MULTIOTP_EXE -createga $usuarioMFA $clave | Out-Null
 
             if ($LASTEXITCODE -eq 11) {
-                & $MULTIOTP_EXE -set $usuarioCp prefix-pin=0 | Out-Null
-                Print-Ok "  $usuarioCp - token registrado"
+                & $MULTIOTP_EXE -set $usuarioMFA prefix-pin=0 | Out-Null
+                Print-Ok "  $usuarioMFA - token registrado"
                 $registrados++
             } elseif ($LASTEXITCODE -eq 22) {
-                Print-Warn "  $usuarioCp - ya registrado (se omite)"
+                Print-Warn "  $usuarioMFA - ya registrado (se omite)"
                 $omitidos++
             } else {
-                Print-Err "  $usuarioCp - error (codigo: $LASTEXITCODE)"
+                Print-Err "  $usuarioMFA - error (codigo: $LASTEXITCODE)"
             }
 
-            $usuario = $null
+            $usuarioMFA = $null
         }
     }
 
@@ -158,18 +239,22 @@ function Mostrar-Instrucciones {
     Clear-Host
     Write-Host "========== Instrucciones de uso ==========" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "ORDEN de ejecucion:"
-    Write-Host "  1) Instalar multiOTP Credential Provider"
-    Write-Host "  2) Configurar Credential Provider"
-    Write-Host "  3) Importar tokens del servidor (necesitas la IP del servidor)"
-    Write-Host "  4) Reiniciar"
+    Write-Host "ORDEN de ejecucion (primera vez):"
+    Write-Host "  1) Unir al dominio  ->  el equipo se reinicia"
+    Write-Host "  2) Instalar multiOTP"
+    Write-Host "  3) Configurar Credential Provider"
+    Write-Host "  4) Importar tokens del servidor"
+    Write-Host "  5) Reiniciar"
     Write-Host ""
-    Write-Host "La opcion 3 se conecta a \\<IP>\c$\Users\dleyva\claves_mfa.txt"
-    Write-Host "y registra todos los tokens localmente en este equipo."
-    Write-Host "La validacion del OTP ocurre de forma local, sin depender del servidor."
+    Write-Host "La opcion 1 configura el DNS hacia $IP_SERVIDOR y une"
+    Write-Host "el equipo al dominio $DOMINIO."
     Write-Host ""
-    Write-Host "Al iniciar sesion pon el usuario como: EMPRESA\dleyva"
-    Write-Host "Se pedira primero la contrasena y luego el codigo de Google Authenticator."
+    Write-Host "La opcion 4 se conecta al servidor, lee las claves MFA"
+    Write-Host "y las registra localmente. Solo necesitas la IP del servidor"
+    Write-Host "y credenciales de administrador de dominio."
+    Write-Host ""
+    Write-Host "Al iniciar sesion usa: EMPRESA\dleyva"
+    Write-Host "Se pedira contrasena y luego el codigo de Google Authenticator."
     Write-Host ""
 }
 
@@ -179,21 +264,23 @@ function Mostrar-Menu {
         Clear-Host
         Write-Host "========== Practica 09: Configuracion MFA - Cliente =========="
         Write-Host ""
-        Write-Host "  [1] Instalar multiOTP Credential Provider"
-        Write-Host "  [2] Configurar Credential Provider"
-        Write-Host "  [3] Importar tokens del servidor"
-        Write-Host "  [4] Ver instrucciones"
-        Write-Host "  [5] Salir"
+        Write-Host "  [1] Unir al dominio empresa.local"
+        Write-Host "  [2] Instalar multiOTP Credential Provider"
+        Write-Host "  [3] Configurar Credential Provider"
+        Write-Host "  [4] Importar tokens del servidor"
+        Write-Host "  [5] Ver instrucciones"
+        Write-Host "  [6] Salir"
         Write-Host ""
 
         $op = Read-Host "Selecciona una opcion"
 
         switch ($op) {
-            "1" { Clear-Host; Instalar-MultiOTP;             Read-Host "`nEnter para continuar" }
-            "2" { Clear-Host; Configurar-CredentialProvider; Read-Host "`nEnter para continuar" }
-            "3" { Clear-Host; Importar-Tokens-Servidor;      Read-Host "`nEnter para continuar" }
-            "4" { Mostrar-Instrucciones;                     Read-Host "`nEnter para continuar" }
-            "5" { Clear-Host; Write-Host "Saliendo..."; return }
+            "1" { Clear-Host; Unir-Dominio;                  Read-Host "`nEnter para continuar" }
+            "2" { Clear-Host; Instalar-MultiOTP;             Read-Host "`nEnter para continuar" }
+            "3" { Clear-Host; Configurar-CredentialProvider; Read-Host "`nEnter para continuar" }
+            "4" { Clear-Host; Importar-Tokens-Servidor;      Read-Host "`nEnter para continuar" }
+            "5" { Mostrar-Instrucciones;                     Read-Host "`nEnter para continuar" }
+            "6" { Clear-Host; Write-Host "Saliendo..."; return }
             default { Print-Warn "Opcion no valida."; Start-Sleep -Seconds 1 }
         }
     } while ($true)

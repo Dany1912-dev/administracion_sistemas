@@ -100,7 +100,7 @@ function Configurar-MultiOTP {
     Set-ItemProperty -Path $MULTIOTP_REG -Name "cpus_logon"        -Value "0e"
     Set-ItemProperty -Path $MULTIOTP_REG -Name "cpus_unlock"       -Value "0e"
     Set-ItemProperty -Path $MULTIOTP_REG -Name "two_step_hide_otp" -Value 1
-    Set-ItemProperty -Path $MULTIOTP_REG -Name "multiOTPUPNFormat" -Value 1
+    Set-ItemProperty -Path $MULTIOTP_REG -Name "multiOTPUPNFormat" -Value 0
     Print-Ok "Credential Provider configurado."
 
     & $MULTIOTP_EXE -config server-secret=$secret | Out-Null
