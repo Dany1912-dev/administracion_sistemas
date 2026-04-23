@@ -3,9 +3,55 @@ $DC_PATH      = "DC=empresa,DC=local"
 $CSV_USUARIOS = "$PSScriptRoot\usuarios_p9.csv"
 
 
+function Configurar-IP-Servidor {
+    Print-Info "Verificando IP estatica en Ethernet 2..."
+
+    $adaptador = Get-NetAdapter | Where-Object { $_.Name -eq "Ethernet 2" -and $_.Status -eq "Up" }
+    if (-not $adaptador) {
+        Print-Warn "Adaptador 'Ethernet 2' no encontrado o no activo."
+        return
+    }
+
+    $ipActual = Get-NetIPAddress -InterfaceIndex $adaptador.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
+    if ($ipActual -and $ipActual.IPAddress -eq "192.168.10.150") {
+        Print-Warn "IP 192.168.10.150 ya configurada en Ethernet 2 (se omite)."
+        return
+    }
+
+    if ($ipActual) {
+        Remove-NetIPAddress -InterfaceIndex $adaptador.ifIndex -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    Remove-NetRoute -InterfaceIndex $adaptador.ifIndex -AddressFamily IPv4 -Confirm:$false -ErrorAction SilentlyContinue
+    New-NetIPAddress -InterfaceIndex $adaptador.ifIndex -AddressFamily IPv4 `
+        -IPAddress "192.168.10.150" -PrefixLength 24 -DefaultGateway "192.168.10.1" | Out-Null
+    Set-DnsClientServerAddress -InterfaceIndex $adaptador.ifIndex -ServerAddresses "127.0.0.1"
+    Print-Ok "IP: 192.168.10.150  |  Gateway: 192.168.10.1  |  DNS: 127.0.0.1"
+}
+
+
+function Configurar-Timezone-Servidor {
+    Print-Info "Verificando zona horaria..."
+
+    if ((Get-TimeZone).Id -ne "US Mountain Standard Time") {
+        Set-TimeZone -Id "US Mountain Standard Time"
+        Print-Ok "Zona horaria configurada: US Mountain Standard Time (UTC-7, Sinaloa)."
+    } else {
+        Print-Warn "Zona horaria ya configurada (se omite)."
+    }
+
+    w32tm /resync /force 2>&1 | Out-Null
+    Print-Ok "Hora sincronizada."
+}
+
+
 function Inicializar-Entorno {
     Write-Host ""
     Write-Host "========== Inicializar Entorno =========="
+
+    Configurar-IP-Servidor
+    Write-Host ""
+    Configurar-Timezone-Servidor
+    Write-Host ""
 
     $rol = Get-WindowsFeature -Name AD-Domain-Services
     if ($rol.InstallState -ne "Installed") {

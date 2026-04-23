@@ -13,8 +13,23 @@ $VCREDIST_EXE  = "$PSScriptRoot\..\lib\Practica9\VC_redist.x64.exe"
 $MULTIOTP_REG  = "Registry::HKEY_CLASSES_ROOT\CLSID\{FCEFDFAB-B0A1-4C4D-8B2B-4FF4E0A3D978}"
 
 
+function Configurar-Timezone-Cliente {
+    if ((Get-TimeZone).Id -ne "US Mountain Standard Time") {
+        Set-TimeZone -Id "US Mountain Standard Time"
+        Print-Ok "Zona horaria configurada: US Mountain Standard Time (UTC-7, Sinaloa)."
+    } else {
+        Print-Warn "Zona horaria ya configurada (se omite)."
+    }
+    w32tm /resync /force 2>&1 | Out-Null
+    Print-Ok "Hora sincronizada."
+}
+
+
 function Unir-Dominio {
     Print-Info "Verificando estado del dominio..."
+
+    Configurar-Timezone-Cliente
+    Write-Host ""
 
     $equipo = Get-WmiObject Win32_ComputerSystem
     if ($equipo.PartOfDomain -and $equipo.Domain -eq $DOMINIO) {
