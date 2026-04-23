@@ -207,13 +207,13 @@ function Crear-AdminDleyva {
         Print-Warn "dleyva ya existe en AD."
     }
 
-    $enDomainAdmins = Get-ADGroupMember "Domain Admins" -ErrorAction SilentlyContinue |
+    $enDomainAdmins = Get-ADGroupMember "Admins. del dominio" -ErrorAction SilentlyContinue |
                       Where-Object { $_.SamAccountName -eq "dleyva" }
     if (-not $enDomainAdmins) {
-        Add-ADGroupMember -Identity "Domain Admins" -Members "dleyva"
-        Print-Ok "dleyva agregado a Domain Admins."
+        Add-ADGroupMember -Identity "Admins. del dominio" -Members "dleyva"
+        Print-Ok "dleyva agregado a Admins. del dominio."
     } else {
-        Print-Warn "dleyva ya es miembro de Domain Admins (se omite)."
+        Print-Warn "dleyva ya es miembro de Admins. del dominio (se omite)."
     }
 }
 
