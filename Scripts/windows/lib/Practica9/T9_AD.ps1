@@ -226,6 +226,9 @@ function Configurar-PerfilesMoviles {
         Print-Ok "Carpeta C:\Perfiles creada."
     }
 
+    icacls "C:\Perfiles" /grant "Usuarios del dominio:(OI)(CI)F" /T | Out-Null
+    Print-Ok "Permisos NTFS configurados en C:\Perfiles."
+
     $share = Get-SmbShare -Name "Perfiles" -ErrorAction SilentlyContinue
     if (-not $share) {
         New-SmbShare -Name "Perfiles" -Path "C:\Perfiles" -FullAccess "Todos" | Out-Null
