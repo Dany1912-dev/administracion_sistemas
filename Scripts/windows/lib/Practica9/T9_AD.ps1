@@ -218,6 +218,37 @@ function Crear-AdminDleyva {
 }
 
 
+function Configurar-PerfilesMoviles {
+    Print-Info "Configurando perfiles moviles..."
+
+    if (-not (Test-Path "C:\Perfiles")) {
+        New-Item -Path "C:\Perfiles" -ItemType Directory -Force | Out-Null
+        Print-Ok "Carpeta C:\Perfiles creada."
+    }
+
+    $share = Get-SmbShare -Name "Perfiles" -ErrorAction SilentlyContinue
+    if (-not $share) {
+        New-SmbShare -Name "Perfiles" -Path "C:\Perfiles" -FullAccess "Todos" | Out-Null
+        Print-Ok "Carpeta compartida como \\$env:COMPUTERNAME\Perfiles"
+    } else {
+        Print-Warn "Compartido 'Perfiles' ya existe (se omite)."
+    }
+
+    $usuarios = @("dleyva")
+    if (Test-Path $CSV_USUARIOS) {
+        $usuarios += (Import-Csv $CSV_USUARIOS).Usuario
+    }
+
+    foreach ($sam in $usuarios) {
+        $existe = Get-ADUser -Filter "SamAccountName -eq '$sam'" -ErrorAction SilentlyContinue
+        if ($existe) {
+            Set-ADUser -Identity $sam -ProfilePath "\\$env:COMPUTERNAME\Perfiles\$sam"
+            Print-Ok "  $sam - perfil movil asignado."
+        }
+    }
+}
+
+
 function Configurar-AD {
     Clear-Host
     Write-Host "========== Configuracion de Active Directory =========="
@@ -230,6 +261,8 @@ function Configurar-AD {
     Crear-UsuariosCSV
     Write-Host ""
     Habilitar-RDP-Usuarios
+    Write-Host ""
+    Configurar-PerfilesMoviles
 
     Write-Host ""
     Print-Ok "Active Directory configurado correctamente."
