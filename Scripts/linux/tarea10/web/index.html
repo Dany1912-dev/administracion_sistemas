@@ -3,59 +3,106 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Leyva Chavez Daniel Humberto - Infraestructura</title>
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <title>Terminal - Sistema Docker</title>
     <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-    <div class="background-animation">
-        <div class="blob blob-1"></div>
-        <div class="blob blob-2"></div>
-        <div class="blob blob-3"></div>
-    </div>
-
-    <div class="container">
-        <header class="glass-header">
-            <div class="profile-section">
-                <!-- Fallback to original logo if available -->
-                <img src="img/logo.png" alt="Logo" class="avatar" onerror="this.src='https://ui-avatars.com/api/?name=Daniel+Leyva&background=0b0f19&color=fff&size=150'" />
-                <div class="titles">
-                    <span class="badge">Administración de Sistemas</span>
-                    <h1>Leyva Chavez Daniel Humberto</h1>
-                    <p class="subtitle">Infraestructura Avanzada con Docker</p>
+    <div class="terminal">
+        <div class="line">root@linux-server:~# ./init_practica10.sh</div>
+        <div class="line">Iniciando sistema para el administrador: <span class="highlight">Leyva Chavez Daniel Humberto</span></div>
+        <br>
+        <div class="line">--- ESTADO DE CONTENEDORES DOCKER ---</div>
+        
+        <div class="boxes">
+            <div class="box">
+                <div class="box-title">[ SERVIDOR WEB ]</div>
+                <div class="box-content">
+                    IMG: Nginx Alpine<br>
+                    PORT: 8080->80<br>
+                    STAT: Online
                 </div>
             </div>
-        </header>
+            <div class="box">
+                <div class="box-title">[ BASE DE DATOS ]</div>
+                <div class="box-content">
+                    IMG: PostgreSQL 16<br>
+                    VOL: db_data<br>
+                    STAT: Online
+                </div>
+            </div>
+            <div class="box">
+                <div class="box-title">[ SERVIDOR FTP ]</div>
+                <div class="box-content">
+                    IMG: Alpine FTP<br>
+                    VOL: web_content<br>
+                    STAT: Online
+                </div>
+            </div>
+        </div>
 
-        <main class="services-grid">
-            <div class="glass-card fade-in" style="--delay: 0.1s">
-                <div class="card-icon">🌐</div>
-                <h2>Servidor Web</h2>
-                <p>Nginx optimizado sobre Alpine Linux con configuración de seguridad estricta para servir contenido estático.</p>
-                <div class="status online"><span></span> En línea</div>
-            </div>
-            
-            <div class="glass-card fade-in" style="--delay: 0.2s">
-                <div class="card-icon">🗄️</div>
-                <h2>Base de Datos</h2>
-                <p>PostgreSQL 16 de alto rendimiento, asegurado y con política de respaldos automáticos configurada.</p>
-                <div class="status online"><span></span> En línea</div>
-            </div>
-            
-            <div class="glass-card fade-in" style="--delay: 0.3s">
-                <div class="card-icon">📁</div>
-                <h2>Servidor FTP</h2>
-                <p>Transferencia de archivos de configuración y binarios usando un protocolo de red dedicado.</p>
-                <div class="status online"><span></span> En línea</div>
-            </div>
-        </main>
-        
-        <footer>
-            <p>&copy; 2026 Daniel Humberto Leyva Chavez - Práctica 10</p>
-        </footer>
+        <br>
+        <div class="line">--- SISTEMA DE ARCHIVOS COMPARTIDO FTP/WEB ---</div>
+        <div class="line">Volumen enlazado detectado. Todo archivo cargado vía FTP al servidor se desplegará aquí.</div>
+        <div class="line">Ingresa el nombre del archivo para visualizarlo en el navegador:</div>
+        <div class="input-line">
+            <span>root@web-client:~# GET /</span>
+            <input type="text" id="ftpFileInput" placeholder="ejemplo.jpg" autocomplete="off" />
+            <button onclick="verArchivo()">[EJECUTAR]</button>
+        </div>
+
+        <br><br>
+        <div class="line">root@linux-server:~# status_check <span class="easter-egg-trigger" onclick="openEasterEgg()">.</span></div>
+        <div class="line">Todo el sistema operando al 100%. Presione CTRL+C para salir<span class="cursor">_</span></div>
     </div>
+
+    <!-- Easter Egg Modal -->
+    <div id="easterEggModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeEasterEgg()">&times;</span>
+            <h2 class="glitch">ARCHIVOS CLASIFICADOS DE BLETCHLEY PARK</h2>
+            <img src="img/Profe%20con%20Turing.jpeg" alt="Evidencia Histórica" class="retro-img">
+            <p class="story">
+                <strong>NIVEL DE ACCESO: TOP SECRET</strong><br><br>
+                Lo que los libros de historia se niegan a contar: En 1941, Alan Turing estaba estancado intentando romper el cifrado de la temible máquina Enigma. Desesperado y a punto de rendirse, utilizó una anomalía cuántica para pedirle ayuda a mi profe.<br><br>
+                Juntos descubrieron que la clave de los nazis no se resolvía con fuerza bruta, sino levantando 3 contenedores de Docker ultra ligeros con Alpine Linux. En esta foto inédita se les ve analizando la arquitectura tras ejecutar el primer 'docker run' que le dio fin a la guerra.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Manejo del visor de archivos FTP
+        function verArchivo() {
+            const fileName = document.getElementById('ftpFileInput').value.trim();
+            if(fileName) {
+                window.open('/' + fileName, '_blank');
+            } else {
+                alert('¡Falta el argumento! Debes ingresar el nombre del archivo.');
+            }
+        }
+
+        // Para que se ejecute presionando Enter
+        document.getElementById('ftpFileInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                verArchivo();
+            }
+        });
+
+        // Manejo del Easter Egg
+        function openEasterEgg() {
+            document.getElementById('easterEggModal').style.display = 'block';
+        }
+
+        function closeEasterEgg() {
+            document.getElementById('easterEggModal').style.display = 'none';
+        }
+
+        // Cerrar modal al hacer clic afuera
+        window.onclick = function(event) {
+            let modal = document.getElementById('easterEggModal');
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+    </script>
 </body>
 </html>
