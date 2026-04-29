@@ -103,9 +103,8 @@ function Habilitar-Vista-Perfiles {
         return
     }
 
-    takeown /f "C:\Perfiles" /r /d s 2>&1 | Out-Null
-    icacls "C:\Perfiles" /grant "Administradores:(OI)(CI)F" /T | Out-Null
-    Print-Ok "Acceso de administrador habilitado en C:\Perfiles."
+    icacls "C:\Perfiles" /grant "Administradores:(OI)(CI)R" /T | Out-Null
+    Print-Ok "Acceso de lectura para administrador habilitado en C:\Perfiles."
 
     Write-Host ""
     Print-Info "Perfiles encontrados:"
@@ -222,8 +221,8 @@ function Crear-Usuario-Completo {
     if (-not (Test-Path $carpetaPerfil)) {
         New-Item -Path $carpetaPerfil -ItemType Directory -Force | Out-Null
     }
-    icacls $carpetaPerfil /grant "Administradores:(OI)(CI)F" | Out-Null
     icacls $carpetaPerfil /grant "${usuario}:(OI)(CI)F"      | Out-Null
+    icacls $carpetaPerfil /grant "Administradores:(OI)(CI)R" | Out-Null
     Print-Ok "Carpeta de perfil creada con permisos: $carpetaPerfil"
 
     if (-not (Test-Path $MULTIOTP_EXE)) {

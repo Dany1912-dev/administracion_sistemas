@@ -32,9 +32,37 @@ function Unir-Dominio {
     Write-Host ""
 
     $equipo = Get-WmiObject Win32_ComputerSystem
-    if ($equipo.PartOfDomain -and $equipo.Domain -eq $DOMINIO) {
-        Print-Warn "Este equipo ya esta unido a $DOMINIO (se omite)."
-        return
+
+    if ($equipo.PartOfDomain) {
+        Write-Host ""
+        if ($equipo.Domain -eq $DOMINIO) {
+            Print-Warn "Este equipo ya esta en el dominio $DOMINIO."
+        } else {
+            Print-Warn "Este equipo esta en el dominio: $($equipo.Domain)"
+        }
+        Write-Host ""
+        Write-Host "  [1] Salir del dominio actual y unirse a $DOMINIO"
+        Write-Host "  [2] Cancelar"
+        Write-Host ""
+        $opDom = Read-Host "Selecciona una opcion"
+
+        if ($opDom -ne "1") {
+            Print-Warn "Operacion cancelada."
+            return
+        }
+
+        Print-Info "Introduce las credenciales del dominio actual ($($equipo.Domain))."
+        $credActual = Get-Credential -Message "Credenciales para salir de $($equipo.Domain)"
+
+        Print-Info "Saliendo del dominio $($equipo.Domain)..."
+        try {
+            Remove-Computer -UnjoinDomainCredential $credActual -WorkgroupName "WORKGROUP" -Force -ErrorAction Stop
+            Print-Ok "Salido del dominio correctamente."
+        } catch {
+            Print-Err "No se pudo salir del dominio: $_"
+            return
+        }
+        Write-Host ""
     }
 
     Write-Host ""

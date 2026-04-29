@@ -227,8 +227,7 @@ function Configurar-PerfilesMoviles {
     }
 
     icacls "C:\Perfiles" /grant "Usuarios del dominio:(OI)(CI)F" /T | Out-Null
-    takeown /f "C:\Perfiles" /r /d s 2>&1 | Out-Null
-    icacls "C:\Perfiles" /grant "Administradores:(OI)(CI)F" /T | Out-Null
+    icacls "C:\Perfiles" /grant "Administradores:(OI)(CI)R" /T | Out-Null
     Print-Ok "Permisos NTFS configurados en C:\Perfiles."
 
     $share = Get-SmbShare -Name "Perfiles" -ErrorAction SilentlyContinue
