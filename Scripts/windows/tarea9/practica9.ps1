@@ -95,6 +95,24 @@ function Seleccionar-Rol {
     }
 }
 
+function Habilitar-Vista-Perfiles {
+    Print-Info "Forzando acceso de administrador a perfiles moviles..."
+
+    if (-not (Test-Path "C:\Perfiles")) {
+        Print-Warn "La carpeta C:\Perfiles no existe."
+        return
+    }
+
+    takeown /f "C:\Perfiles" /r /d s 2>&1 | Out-Null
+    icacls "C:\Perfiles" /grant "Administradores:(OI)(CI)F" /T | Out-Null
+    Print-Ok "Acceso de administrador habilitado en C:\Perfiles."
+
+    Write-Host ""
+    Print-Info "Perfiles encontrados:"
+    Get-ChildItem "C:\Perfiles" | ForEach-Object { Write-Host "  $($_.Name)" }
+}
+
+
 function Administrar-Usuarios {
     do {
         Clear-Host
@@ -104,7 +122,8 @@ function Administrar-Usuarios {
         Write-Host "  [2] Asignar rol a usuario"
         Write-Host "  [3] Eliminar rol de usuario"
         Write-Host "  [4] Cambiar rol de usuario"
-        Write-Host "  [5] Volver"
+        Write-Host "  [5] Habilitar vista de perfiles moviles"
+        Write-Host "  [6] Volver"
         Write-Host ""
 
         $op = Read-Host "Selecciona una opcion"
@@ -145,7 +164,12 @@ function Administrar-Usuarios {
                 Cambiar-Rol -Sam $sam -NuevoRol $rol
                 Read-Host "`nEnter para continuar"
             }
-            "5" { return }
+            "5" {
+                Clear-Host
+                Habilitar-Vista-Perfiles
+                Read-Host "`nEnter para continuar"
+            }
+            "6" { return }
             default { Print-Warn "Opcion no valida."; Start-Sleep -Seconds 1 }
         }
     } while ($true)
@@ -193,6 +217,14 @@ function Crear-Usuario-Completo {
         Print-Err "Error al crear usuario: $_"
         return
     }
+
+    $carpetaPerfil = "C:\Perfiles\$usuario"
+    if (-not (Test-Path $carpetaPerfil)) {
+        New-Item -Path $carpetaPerfil -ItemType Directory -Force | Out-Null
+    }
+    icacls $carpetaPerfil /grant "Administradores:(OI)(CI)F" | Out-Null
+    icacls $carpetaPerfil /grant "${usuario}:(OI)(CI)F"      | Out-Null
+    Print-Ok "Carpeta de perfil creada con permisos: $carpetaPerfil"
 
     if (-not (Test-Path $MULTIOTP_EXE)) {
         Print-Warn "multiOTP no encontrado. El usuario fue creado en AD pero sin token OTP."
