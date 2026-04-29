@@ -51,8 +51,9 @@ function Unir-Dominio {
             return
         }
 
-        Print-Info "Introduce las credenciales del dominio actual ($($equipo.Domain))."
-        $credActual = Get-Credential -Message "Credenciales para salir de $($equipo.Domain)"
+        Print-Info "Introduce las credenciales de administrador del dominio actual."
+        $dominioNetbios = $equipo.Domain.Split(".")[0].ToUpper()
+        $credActual = Get-Credential -UserName "$dominioNetbios\dleyva" -Message "Credenciales para salir de $($equipo.Domain)"
 
         Print-Info "Saliendo del dominio $($equipo.Domain)..."
         try {
@@ -60,6 +61,7 @@ function Unir-Dominio {
             Print-Ok "Salido del dominio correctamente."
         } catch {
             Print-Err "No se pudo salir del dominio: $_"
+            Print-Info "Asegurate de ingresar el usuario como DOMINIO\usuario (ej: EMPRESA\dleyva)"
             return
         }
         Write-Host ""
