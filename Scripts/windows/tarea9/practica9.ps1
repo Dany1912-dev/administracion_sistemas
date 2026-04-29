@@ -151,6 +151,80 @@ function Administrar-Usuarios {
     } while ($true)
 }
 
+function Crear-Usuario-Completo {
+    Clear-Host
+    Write-Host "========== Crear Nuevo Usuario =========="
+    Write-Host ""
+
+    $nombre  = Read-Host "Nombre"
+    $apellido = Read-Host "Apellido"
+    $usuario  = Read-Host "Nombre de usuario (SamAccountName)"
+
+    Write-Host ""
+    Write-Host "  [1] Cuates"
+    Write-Host "  [2] NoCuates"
+    $ouSel = Read-Host "OU"
+    $ou = switch ($ouSel) {
+        "1" { "Cuates"   }
+        "2" { "NoCuates" }
+        default { $null  }
+    }
+    if (-not $ou) { Print-Err "OU invalida."; return }
+
+    $pass = Read-Host "Contrasena" -AsSecureString
+
+    $existe = Get-ADUser -Filter "SamAccountName -eq '$usuario'" -ErrorAction SilentlyContinue
+    if ($existe) { Print-Err "El usuario '$usuario' ya existe en AD."; return }
+
+    Print-Info "Creando usuario en AD..."
+    try {
+        New-ADUser `
+            -Name              "$nombre $apellido" `
+            -GivenName         $nombre `
+            -Surname           $apellido `
+            -SamAccountName    $usuario `
+            -UserPrincipalName "$usuario@$DOMINIO" `
+            -AccountPassword   $pass `
+            -Path              "OU=$ou,$DC_PATH" `
+            -Enabled           $true `
+            -ProfilePath       "\\$env:COMPUTERNAME\Perfiles\$usuario"
+        Print-Ok "Usuario '$usuario' creado en OU=$ou."
+    } catch {
+        Print-Err "Error al crear usuario: $_"
+        return
+    }
+
+    if (-not (Test-Path $MULTIOTP_EXE)) {
+        Print-Warn "multiOTP no encontrado. El usuario fue creado en AD pero sin token OTP."
+        return
+    }
+
+    Print-Info "Generando token OTP..."
+    $clave = Generar-ClaveTOTP
+    & $MULTIOTP_EXE -createga $usuario $clave | Out-Null
+
+    if ($LASTEXITCODE -eq 11) {
+        & $MULTIOTP_EXE -set $usuario prefix-pin=0 | Out-Null
+
+        ""                                       | Out-File $RUTA_CLAVES -Append -Encoding UTF8
+        "Usuario: $usuario"                      | Out-File $RUTA_CLAVES -Append -Encoding UTF8
+        "  Nombre en GA: $usuario@$DOMINIO_MFA" | Out-File $RUTA_CLAVES -Append -Encoding UTF8
+        "  Clave:        $clave"                 | Out-File $RUTA_CLAVES -Append -Encoding UTF8
+
+        Write-Host ""
+        Write-Host "========== Token para Google Authenticator ==========" -ForegroundColor Yellow
+        Write-Host "  Usuario : $usuario"
+        Write-Host "  Clave   : " -NoNewline
+        Write-Host $clave -ForegroundColor Green
+        Write-Host "  Tipo    : Basada en tiempo (TOTP)"
+        Write-Host "=====================================================" -ForegroundColor Yellow
+        Print-Ok "Token guardado en: $RUTA_CLAVES"
+    } else {
+        Print-Err "Error al registrar token OTP (codigo: $LASTEXITCODE)."
+    }
+}
+
+
 function Mostrar-Menu {
     do {
         Clear-Host
@@ -163,20 +237,22 @@ function Mostrar-Menu {
         Write-Host "  [5] Configurar MFA"
         Write-Host "  [6] Generar Reporte de Auditoria"
         Write-Host "  [7] Administrar Usuarios"
-        Write-Host "  [8] Salir"
+        Write-Host "  [8] Crear nuevo usuario"
+        Write-Host "  [9] Salir"
         Write-Host ""
 
         $op = Read-Host "Selecciona una opcion"
 
         switch ($op) {
-            "1" { Clear-Host; Inicializar-Entorno;   Read-Host "`nEnter para continuar" }
-            "2" { Clear-Host; Configurar-AD;         Read-Host "`nEnter para continuar" }
-            "3" { Clear-Host; Configurar-Delegacion; Read-Host "`nEnter para continuar" }
-            "4" { Clear-Host; Configurar-Politicas;  Read-Host "`nEnter para continuar" }
-            "5" { Clear-Host; Configurar-MFA;        Read-Host "`nEnter para continuar" }
-            "6" { Clear-Host; Generar-Reporte;       Read-Host "`nEnter para continuar" }
+            "1" { Clear-Host; Inicializar-Entorno;    Read-Host "`nEnter para continuar" }
+            "2" { Clear-Host; Configurar-AD;          Read-Host "`nEnter para continuar" }
+            "3" { Clear-Host; Configurar-Delegacion;  Read-Host "`nEnter para continuar" }
+            "4" { Clear-Host; Configurar-Politicas;   Read-Host "`nEnter para continuar" }
+            "5" { Clear-Host; Configurar-MFA;         Read-Host "`nEnter para continuar" }
+            "6" { Clear-Host; Generar-Reporte;        Read-Host "`nEnter para continuar" }
             "7" { Administrar-Usuarios }
-            "8" { Clear-Host; Write-Host "Saliendo..."; return }
+            "8" { Crear-Usuario-Completo;             Read-Host "`nEnter para continuar" }
+            "9" { Clear-Host; Write-Host "Saliendo..."; return }
             default { Print-Warn "Opcion no valida."; Start-Sleep -Seconds 1 }
         }
     } while ($true)
