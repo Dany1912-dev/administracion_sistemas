@@ -377,25 +377,35 @@ function Salir-Dominio {
 
     Print-Info "Dominio actual: $($equipo.Domain)"
     Write-Host ""
-    $confirm = Read-Host "Confirmar salida del dominio $($equipo.Domain) (s/n)"
-    if ($confirm -ne "s") {
+    Write-Host "  [1] Salir normalmente (servidor disponible)"
+    Write-Host "  [2] Forzar salida (servidor apagado o no disponible)"
+    Write-Host "  [3] Cancelar"
+    Write-Host ""
+    $modo = Read-Host "Selecciona una opcion"
+
+    if ($modo -eq "3" -or [string]::IsNullOrWhiteSpace($modo)) {
         Print-Warn "Operacion cancelada."
         return
     }
 
-    $dominioNetbios = $equipo.Domain.Split(".")[0].ToUpper()
-    $cred = Get-Credential -UserName "$dominioNetbios\dleyva" -Message "Credenciales para salir de $($equipo.Domain)"
+    Print-Info "Saliendo del dominio $($equipo.Domain)..."
 
-    Print-Info "Saliendo del dominio..."
-    try {
-        Remove-Computer -UnjoinDomainCredential $cred -WorkgroupName "WORKGROUP" -Force -ErrorAction Stop
+    if ($modo -eq "1") {
+        $dominioNetbios = $equipo.Domain.Split(".")[0].ToUpper()
+        $cred = Get-Credential -UserName "$dominioNetbios\dleyva" -Message "Credenciales para salir de $($equipo.Domain)"
+        $pass = $cred.GetNetworkCredential().Password
+        $result = $equipo.UnjoinDomainOrWorkgroup($pass, $cred.UserName, 0)
+    } else {
+        $result = $equipo.UnjoinDomainOrWorkgroup($null, $null, 0)
+    }
+
+    if ($result.ReturnValue -eq 0) {
         Print-Ok "Salido del dominio correctamente."
         Print-Warn "Reinicia el equipo para aplicar los cambios."
         Read-Host "`nEnter para reiniciar"
         Restart-Computer -Force
-    } catch {
-        Print-Err "No se pudo salir del dominio: $_"
-        Print-Info "Asegurate de ingresar el usuario como DOMINIO\usuario (ej: EMPRESA\dleyva)"
+    } else {
+        Print-Err "Error al salir del dominio (codigo: $($result.ReturnValue))."
     }
 }
 
