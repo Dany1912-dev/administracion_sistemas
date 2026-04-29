@@ -367,6 +367,39 @@ function Limpiar-Usuarios-MultiOTP {
 }
 
 
+function Salir-Dominio {
+    $equipo = Get-WmiObject Win32_ComputerSystem
+
+    if (-not $equipo.PartOfDomain) {
+        Print-Warn "Este equipo no esta en ningun dominio."
+        return
+    }
+
+    Print-Info "Dominio actual: $($equipo.Domain)"
+    Write-Host ""
+    $confirm = Read-Host "Confirmar salida del dominio $($equipo.Domain) (s/n)"
+    if ($confirm -ne "s") {
+        Print-Warn "Operacion cancelada."
+        return
+    }
+
+    $dominioNetbios = $equipo.Domain.Split(".")[0].ToUpper()
+    $cred = Get-Credential -UserName "$dominioNetbios\dleyva" -Message "Credenciales para salir de $($equipo.Domain)"
+
+    Print-Info "Saliendo del dominio..."
+    try {
+        Remove-Computer -UnjoinDomainCredential $cred -WorkgroupName "WORKGROUP" -Force -ErrorAction Stop
+        Print-Ok "Salido del dominio correctamente."
+        Print-Warn "Reinicia el equipo para aplicar los cambios."
+        Read-Host "`nEnter para reiniciar"
+        Restart-Computer -Force
+    } catch {
+        Print-Err "No se pudo salir del dominio: $_"
+        Print-Info "Asegurate de ingresar el usuario como DOMINIO\usuario (ej: EMPRESA\dleyva)"
+    }
+}
+
+
 function Mostrar-Menu {
     do {
         Clear-Host
@@ -378,7 +411,8 @@ function Mostrar-Menu {
         Write-Host "  [4] Importar tokens del servidor"
         Write-Host "  [5] Ver instrucciones"
         Write-Host "  [6] Limpiar usuarios multiOTP"
-        Write-Host "  [7] Salir"
+        Write-Host "  [7] Salir del dominio actual"
+        Write-Host "  [8] Salir"
         Write-Host ""
 
         $op = Read-Host "Selecciona una opcion"
@@ -390,7 +424,8 @@ function Mostrar-Menu {
             "4" { Clear-Host; Importar-Tokens-Servidor;      Read-Host "`nEnter para continuar" }
             "5" { Mostrar-Instrucciones;                     Read-Host "`nEnter para continuar" }
             "6" { Clear-Host; Limpiar-Usuarios-MultiOTP;     Read-Host "`nEnter para continuar" }
-            "7" { Clear-Host; Write-Host "Saliendo..."; return }
+            "7" { Clear-Host; Salir-Dominio;                 Read-Host "`nEnter para continuar" }
+            "8" { Clear-Host; Write-Host "Saliendo..."; return }
             default { Print-Warn "Opcion no valida."; Start-Sleep -Seconds 1 }
         }
     } while ($true)
